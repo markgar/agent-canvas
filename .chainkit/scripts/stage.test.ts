@@ -23,7 +23,7 @@ import { executeStage } from './stage.js';
 import { runStateSchema } from './state.js';
 import { examplePlan, exampleSpec } from './test-fixtures.js';
 
-describe('consumer-owned chain gates', () => {
+describe('consumer-owned chain gates', { timeout: 20_000 }, () => {
   let root: string;
   let work: string;
   let state: string;

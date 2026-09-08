@@ -2,7 +2,7 @@
 id: 001-live-display
 title: Live read-only display
 status: draft
-base_commit: 152f5685f48cfc8eeab7c9e9153b45225d0c1f07
+base_commit: 0719425d5170f9558bba2fe42c8ca0faa6e7be2b
 approved_by: null
 approved_at: null
 checks:

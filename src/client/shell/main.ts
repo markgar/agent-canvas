@@ -1,6 +1,7 @@
 import './main.css';
 
 import { FrameRenderer } from '../rendering/frame.js';
+import { DisplayConnection, type ConnectionStatus } from './connection.js';
 
 const BOOTSTRAP_TIMEOUT_MS = 15_000;
 
@@ -27,12 +28,73 @@ const renderer = new FrameRenderer(
   },
   styleNonce,
 );
+let connection: DisplayConnection | null = null;
 
-function setState(status: string, detail?: string): void {
+function setState(
+  status: string,
+  detail?: string,
+  connectionStatus?: ConnectionStatus,
+): void {
   statusElement.textContent = status;
+  if (connectionStatus === undefined) {
+    delete statusElement.dataset['state'];
+  } else {
+    statusElement.dataset['state'] = connectionStatus;
+  }
   if (detail !== undefined) {
     detailElement.textContent = detail;
   }
+}
+
+function startConnection(): void {
+  if (connection !== null) {
+    return;
+  }
+
+  connection = new DisplayConnection({
+    visibility: {
+      isHidden: () => document.hidden,
+      addChangeListener: (listener) => {
+        document.addEventListener('visibilitychange', listener);
+      },
+      removeChangeListener: (listener) => {
+        document.removeEventListener('visibilitychange', listener);
+      },
+    },
+    onSnapshot: (snapshot, action) => {
+      if (action === 'replace') {
+        renderer.render(snapshot.view);
+      }
+    },
+    onStatus: (status) => {
+      const label =
+        status === 'connected'
+          ? 'Connected'
+          : status === 'reconnecting'
+            ? 'Reconnecting'
+            : 'Disconnected';
+      setState(label, undefined, status);
+    },
+    onStale: (stale) => {
+      renderer.setStale(stale);
+    },
+    onTerminalFailure: (failure) => {
+      if (failure === 'access') {
+        setState(
+          'Disconnected',
+          'Access denied. Open a fresh Agent Canvas access URL to continue.',
+          'disconnected',
+        );
+        return;
+      }
+      setState(
+        'Disconnected',
+        'Connection error. The local Agent Canvas display stream returned an unexpected response.',
+        'disconnected',
+      );
+    },
+  });
+  connection.start();
 }
 
 function takeFragmentToken(): { supplied: boolean; token: string } {
@@ -69,20 +131,22 @@ function startBootstrap(token: string): Promise<Response> {
 async function handleBootstrap(request: Promise<Response>): Promise<void> {
   const response = await request;
   if (response.status === 204) {
-    renderer.render(null);
     setState('Session ready', 'Waiting for the assistant to present a view.');
+    window.setTimeout(startConnection, 50);
     return;
   }
   if (response.status === 401 || response.status === 403) {
     setState(
       'Access denied',
       'Open a fresh Agent Canvas access URL to continue.',
+      'disconnected',
     );
     return;
   }
   setState(
     'Unavailable',
     'The local Agent Canvas session could not be established.',
+    'disconnected',
   );
 }
 
@@ -90,7 +154,12 @@ function initialize(): void {
   const fragment = takeFragmentToken();
   const { supplied } = fragment;
   if (!supplied) {
-    setState('Connecting', 'Checking the existing local browser session.');
+    setState(
+      'Reconnecting',
+      'Checking the existing local browser session.',
+      'reconnecting',
+    );
+    startConnection();
     return;
   }
 
@@ -101,8 +170,13 @@ function initialize(): void {
     setState(
       'Unavailable',
       'The local Agent Canvas session could not be established.',
+      'disconnected',
     );
   });
 }
+
+window.addEventListener('pagehide', () => {
+  connection?.stop();
+});
 
 initialize();

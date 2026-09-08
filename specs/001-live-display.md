@@ -9,17 +9,9 @@ checks:
   - id: scaffold-types
     command: [npm, run, typecheck]
   - id: live-core
-    command:
-      - node
-      - node_modules/vitest/vitest.mjs
-      - run
-      - tests/integration/live-display.test.ts
+    command: [node, scripts/check-live.mjs, --suite, core]
   - id: live-security
-    command:
-      - node
-      - node_modules/vitest/vitest.mjs
-      - run
-      - tests/integration/live-security.test.ts
+    command: [node, scripts/check-live.mjs, --suite, security]
   - id: live-browser
     command: [node, scripts/check-live-browser.mjs, --suite, behavior]
   - id: live-latency-small
@@ -446,6 +438,30 @@ Each command stays within the host's two-minute limit. Latency workloads are
 separate commands so behavior tests do not share their time budget.
 Preparation changes code/config, so re-ground and review this draft again afterward.
 
+Prepared runners select fixed, reviewed suites rather than arbitrary commands.
+They reserve time for cleanup within the host's 120-second command limit and
+emit a bounded, versioned, content-free result. Exit 0 means all required
+assertions passed; exit 1 means incomplete/incorrect feature behavior; exit 2
+means runner/setup failure. The host recognizes that distinction only for the
+exact registered live-runner commands and validates their result envelope.
+Ordinary tools retain their own exit-code semantics. Missing/malformed reports
+or missing tooling stop the run; a valid scaffold lacking MCP/browser behavior
+is a genuine behavioral failure, not a passing check or an installation failure.
+
+Baseline CI retains scaffold/tooling tests and coverage, separating only the two
+registered live integration acceptance entry files from default test discovery.
+The live suites remain independently runnable and fail honestly before feature
+implementation. As explicitly selected during preparation review, live CI runs
+on source-changing PRs, explicit manual invocation, and every change once the
+feature is complete; completion in either the base or head activates it.
+Before completion, changes to established live regression/build paths also
+activate it once the base tree contains the implementation. Merely approving the
+spec does not activate live CI and prevent preparation from landing first.
+Unknown status or unavailable comparison history is a gate error, not permission
+to omit acceptance. Chainkit always runs the selected feature's approved checks,
+regardless of the CI activation rule. Green baseline CI alone is not feature
+acceptance.
+
 | Requirement IDs    | Check IDs                                                       | Required automated evidence                                                                                                                                                                                                              |
 | ------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | LIVE-001, LIVE-002 | scaffold-types, live-core                                       | Launch actual compiled entry point via official SDK client; exactly three tools and result/error envelopes; clean stdout and safe stderr; startup failure, stdin EOF/signals, and stream counts.                                         |
@@ -474,6 +490,30 @@ foreground rendering, not physical screen scanout or user attention.
 Keep the browser foreground during loss-timing checks as well; idle-session
 expiry and revision overflow may use injected clocks/state in non-browser tests.
 
+For deterministic component evidence, preparation defines reviewed test-side
+ports and scenarios in `tests/acceptance/seams.ts`. The future feature supplies
+`tests/acceptance/product-adapter.ts`, exporting `createProductAdapter()`, as a
+thin binding to actual production factories. It must provide the reviewed
+display, session, and HTTP probe capabilities without duplicating product logic.
+The adapter is feature implementation work, not a prerequisite mock supplied to
+make preparation appear successful. Its absence is named behavioral
+incompleteness, never a skip or a fabricated pass.
+
+These component scenarios may inject a monotonic clock/state seed, controlled
+writers/drain/failure and scheduling barriers, and sanitizer output/failure.
+They prove revision overflow, exact idle expiry, atomic subscription/serialization,
+one-pending-snapshot/backpressure behavior, and safe processing failures.
+The exact normalized 1 MiB boundary uses controlled sanitizer output because
+generated-ID serialization is not a fixed raw-input contract; actual sanitizer
+integration and expansion cases remain mandatory separately.
+The adapter must call real production operations, observe actual pending state,
+and release resources. Review its delegation against production call paths before
+acceptance; matching a structural interface is not evidence of correct binding.
+No production debug endpoint, test-only MCP/IPC protocol, global test API, or
+environment-triggered access bypass is permitted. Independent actual compiled-
+process, HTTP, and browser evidence remains mandatory and cannot be replaced by
+these component scenarios or by harness self-tests.
+
 **Human-only:** In GitHub Copilot CLI on macOS, launch the compiled process directly
 (not via `npm start`), discover the tools, and manually open the URL in Chrome and
 Edge. Exercise empty state, synthetic present/replace/clear, second tab, reload
@@ -494,6 +534,11 @@ means stop at synthetic content; synthetic tests cannot complete this manual ste
   text/table/flex HTML/CSS subset; both CSS-field and inline styles normalized into
   nonce-authorized rules; cookie reuse and 24-hour idle expiry. These choices
   resolve the previous support, rendering, and session questions, not approval.
+- **Preparation review choices (2026-09-08):** explicit baseline/live CI separation
+  as described under Acceptance; bounded, safely reporting core/security
+  wrappers; test-side bindings for deterministic component evidence rather than
+  debugging capabilities in the shipped application. Actual prepared oracles
+  and bindings still require review; these choices do not authorize a paid run.
 - **Contract clarifications in this draft:** public shell versus authenticated
   content, named observable heartbeats with status-aware fetch streaming,
   inherited CSP compatibility, exact error precedence and limits, and automated

@@ -47,11 +47,13 @@ Do not inject completed historical specs or unrelated stage packs.
 - **PLAN-008 — Validation gate.** Validate references, ownership, current baseline,
   and prerequisite readiness before any coding. Recheck before executing an
   approved plan; an invalid or stale plan performs no writes.
-- **PLAN-009 — Execution budget.** Execute one chunk at a time, then one fresh
-  independent reviewer, with at most two repair rounds under the same boundaries.
+- **PLAN-009 — Execution budget.** Review the plan once, apply its bounded findings
+  once in the original planner lineage, then lock the deterministically valid result.
+  Execute one chunk at a time with one fresh independent review and one direct repair
+  pass under the same boundaries.
   Each chunk must cover a cohesive, reviewable capability and its tests, with
   relevant context only. Reject whole-feature "write all tests" assignments and
   unrelated work bundled to fit the eight-chunk ceiling. If the feature cannot
   fit in context-sized chunks, stop for a smaller feature contract.
-  Exhaustion or unresolved findings means stop, not more agents or retries.
+  Objective post-repair failure means stop, not more reviewers or retries.
   No push, merge, or automatic approval.

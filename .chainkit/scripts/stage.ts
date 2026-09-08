@@ -8,7 +8,6 @@ import { runReadOnlyCheck } from './checks.js';
 import {
   parseSpec,
   requireApproval,
-  reviewSchema,
   sliceSpec,
   validatePlan,
 } from './contracts.js';
@@ -73,23 +72,18 @@ export function executeStage(operation: string): unknown {
     return { ready: true };
   }
 
-  if (['check-plan', 'plan-decision', 'lock-plan'].includes(operation)) {
+  if (['check-plan', 'check-build-plan', 'lock-plan'].includes(operation)) {
     if (fingerprint(cwd) !== state.initialFingerprint) {
       throw new Error('Planning/review stages must not modify the repository.');
     }
     const artifacts = readArtifacts();
-    const plan = validatePlan(artifacts['plan'], spec);
+    const artifact = operation === 'check-plan' ? 'plan' : 'buildPlan';
+    const plan = validatePlan(artifacts[artifact], spec);
     assertNoSymlinkParents(
       cwd,
       plan.chunks.flatMap((chunk) => chunk.files),
     );
-    if (operation === 'plan-decision') {
-      return reviewSchema.parse(artifacts['planReview']);
-    }
     if (operation === 'lock-plan') {
-      const verdict = reviewSchema.parse(artifacts['planVerdict']);
-      if (!verdict.pass)
-        throw new Error('Rejected plan cannot enter implementation.');
       writeState('plan.json', plan);
     }
     return { valid: true };
@@ -132,8 +126,6 @@ export function executeStage(operation: string): unknown {
     writeState('chunk.json', {
       id: chunk.id,
       head: git(cwd, 'rev-parse', 'HEAD'),
-      reviewedFingerprint: null,
-      pass: false,
     });
     return sliceSpec(spec, approved.specRefs);
   }
@@ -188,61 +180,20 @@ export function executeStage(operation: string): unknown {
 
   if (operation === 'measure') return measure();
 
-  if (operation === 'decide') {
-    const artifacts = readArtifacts();
-    const review = reviewSchema.parse(artifacts['review']);
-    const facts = factsSchema.parse(artifacts['facts']);
-    if (facts.fingerprint !== fingerprint(cwd)) {
-      throw new Error(
-        'Reviewer changed the tree or judged a stale measurement.',
-      );
-    }
-    const findings = [...review.findings];
-    for (const check of facts.checks.filter((check) => !check.pass)) {
-      findings.push({
-        id: `check-${check.id}`,
-        file: '(acceptance)',
-        requirement: check.id,
-        problem: check.output,
-        remedy: 'Fix the implementation; do not weaken the approved check.',
-      });
-    }
-    if (facts.outOfScope.length) {
-      findings.push({
-        id: 'file-scope',
-        file: facts.outOfScope.join(', '),
-        requirement: 'owned-files',
-        problem: 'Changes extend beyond this chunk.',
-        remedy:
-          'Stop and request a revised plan if these changes are necessary.',
-      });
-    }
-    const pass = review.pass && facts.pass;
-    writeState('chunk.json', {
-      ...chunkState,
-      reviewedFingerprint: facts.fingerprint,
-      pass,
-    });
-    return { pass, findings };
-  }
-
   if (operation === 'chunk-gate') {
-    if (
-      !chunkState.pass ||
-      chunkState.reviewedFingerprint !== fingerprint(cwd)
-    ) {
-      throw new Error(
-        'Chunk requires a passing review of its current contents.',
-      );
-    }
+    const facts = factsSchema.parse(readArtifacts()['facts']);
+    if (facts.fingerprint !== fingerprint(cwd))
+      throw new Error('Chunk gate received stale measured facts.');
+    if (!facts.pass)
+      throw new Error('Chunk remains outside ownership or acceptance.');
     if (!changedFiles(cwd).length) throw new Error('Chunk made no changes.');
-    const facts = measure();
-    for (const check of facts.checks) {
+    const current = measure();
+    for (const check of current.checks) {
       process.stdout.write(
         `${check.id}: ${check.pass ? 'PASS' : 'FAIL'}\n${check.output}\n`,
       );
     }
-    if (!facts.pass)
+    if (!current.pass)
       throw new Error('Chunk failed measured acceptance or ownership.');
     return { pass: true };
   }

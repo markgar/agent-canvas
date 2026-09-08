@@ -37,7 +37,7 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function fixture(mode: 'pass' | 'reject-plan' | 'reject-code') {
+function fixture(mode: 'pass' | 'plan-findings' | 'code-findings') {
   const root = mkdtempSync(path.join(tmpdir(), 'canvas-engine-test-'));
   directories.push(root);
   const work = path.join(root, 'work');
@@ -88,6 +88,7 @@ function fixture(mode: 'pass' | 'reject-plan' | 'reject-code') {
     delete stage['prompt'];
     delete stage['tools'];
     delete stage['resume'];
+    delete stage['resumeFrom'];
     stage['run'] =
       "node -e \"require('node:fs').writeFileSync('src/value.ts','export const value = 1;\\\\n')\"";
   }
@@ -105,21 +106,19 @@ function fixture(mode: 'pass' | 'reject-plan' | 'reject-code') {
   git(work, 'commit', '-qm', 'approved spec');
   const base = git(work, 'rev-parse', 'HEAD');
   const streams: Record<string, unknown> = {
-    'plan.r1': examplePlan(),
-    'plan.r2': examplePlan(),
-    'plan-review.r1': {
-      pass: mode !== 'reject-plan',
-      findings: mode === 'reject-plan' ? [finding] : [],
+    plan: examplePlan(),
+    'plan-review': {
+      pass: mode !== 'plan-findings',
+      findings: mode === 'plan-findings' ? [finding] : [],
     },
-    'plan-review.r2': { pass: false, findings: [finding] },
-    'initial-review.i1': {
-      pass: mode !== 'reject-code',
-      findings: mode === 'reject-code' ? [finding] : [],
+    'plan-fix': examplePlan(),
+    'review.i1': {
+      pass: mode !== 'code-findings',
+      findings: mode === 'code-findings' ? [finding] : [],
     },
-    'repair-review.i1.r1': { pass: false, findings: [finding] },
-    'repair-review.i1.r2': { pass: false, findings: [finding] },
   };
   for (const [label, content] of Object.entries(streams)) {
+    const sessionId = label === 'plan' ? 'plan-session' : `session-${label}`;
     writeFileSync(
       path.join(replay, `${label}.jsonl`),
       [
@@ -127,7 +126,7 @@ function fixture(mode: 'pass' | 'reject-plan' | 'reject-code') {
           type: 'assistant.message',
           data: { model: 'gpt-5.6-sol', content: JSON.stringify(content) },
         }),
-        JSON.stringify({ type: 'result', data: {} }),
+        JSON.stringify({ type: 'result', sessionId }),
         '',
       ].join('\n'),
     );
@@ -165,7 +164,7 @@ function fixture(mode: 'pass' | 'reject-plan' | 'reject-code') {
 }
 
 describe('actual executor wiring with offline model replay', () => {
-  it('delivers and checkpoints after independent gates, skipping unnecessary repair', () => {
+  it('delivers after one review, one repair handoff, and objective gates', () => {
     const { work, base, result, record } = fixture('pass');
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(readFileSync(path.join(work, 'src/value.ts'), 'utf8')).toContain(
@@ -173,25 +172,24 @@ describe('actual executor wiring with offline model replay', () => {
     );
     expect(git(work, 'rev-list', '--count', `${base}..HEAD`)).toBe('1');
     expect(git(work, 'status', '--porcelain')).toBe('');
-    expect(result.stdout).not.toContain('→ fix');
+    expect(result.stdout.match(/→ fix/g)?.length).toBe(1);
     expect(record).toContain('"delivered": true');
   }, 70_000);
 
-  it('never enters implementation after rejected planning', () => {
-    const { work, base, result } = fixture('reject-plan');
-    expect(result.status, result.stdout + result.stderr).toBe(1);
+  it('applies plan findings once and proceeds with the corrected plan', () => {
+    const { work, base, result } = fixture('plan-findings');
+    expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain('plan-review');
-    expect(result.stdout).not.toContain('→ code');
-    expect(existsSync(path.join(work, 'src/value.ts'))).toBe(false);
-    expect(git(work, 'rev-parse', 'HEAD')).toBe(base);
+    expect(result.stdout).toContain('plan-fix');
+    expect(result.stdout).toContain('→ code');
+    expect(git(work, 'rev-list', '--count', `${base}..HEAD`)).toBe('1');
   }, 70_000);
 
-  it('does not checkpoint a still-rejected chunk after bounded repair', () => {
-    const { work, base, result } = fixture('reject-code');
-    expect(result.status, result.stdout + result.stderr).toBe(1);
-    expect(result.stdout).toContain('→ fix');
-    expect(result.stdout.match(/→ fix/g)?.length).toBeLessThanOrEqual(2);
-    expect(git(work, 'rev-parse', 'HEAD')).toBe(base);
+  it('passes implementation findings directly to one repair before gating', () => {
+    const { work, base, result } = fixture('code-findings');
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout.match(/→ fix/g)?.length).toBe(1);
+    expect(git(work, 'rev-list', '--count', `${base}..HEAD`)).toBe('1');
   }, 70_000);
 
   it('rejects modified and added vendor files', () => {

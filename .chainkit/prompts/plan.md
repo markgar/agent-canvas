@@ -16,10 +16,6 @@ explicit policy is authoritative.
 
 {{spec}}
 
-## Previous review
-
-{{planVerdict}}
-
 Return only JSON: `{"chunks":[{"id":"slug","title":"outcome","files":["literal/path.ts"],
 "specRefs":["exact heading"],"requirementIds":["LIVE-001"],"checkIds":["approved-check"],
 "blueprint":"grounded implementation and verification decisions"}]}`.

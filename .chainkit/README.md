@@ -70,23 +70,22 @@ prompts, findings, and command output; treat them as potentially sensitive.
 
 The planner assigns one to eight cohesive, context-sized sequential chunks with
 exact file ownership per active chunk. Later chunks may explicitly revisit a file;
-dependencies and preservation of earlier behavior are reviewed. Each requirement
-and approved check must be assigned. The plan receives
-a blocking independent review, with at most two planning rounds; deterministic
-plan completion has at most two attempts within each round.
+dependencies and preservation of earlier behavior are reviewed. Each requirement and approved check must be assigned. The plan receives one
+independent review and one direct correction pass in the original planner lineage.
+The corrected build plan must pass deterministic completion before it is locked.
 
 Each chunk receives the product/coding rules and literal selected spec sections,
 including their subsections. The builder writes the capability and focused tests.
 The host rebuilds current artifacts, then executes typechecking, baseline tests,
 selected acceptance commands and formatting. Build failure blocks checks against
 old artifacts. A fresh reviewer sees the full spec and measured
-facts. Builder notes are not evidence. A passing model verdict cannot override
-failed checks or out-of-scope files.
+facts. Builder notes are not evidence. Reviewer advice cannot override failed checks
+or out-of-scope files.
 
-A rejected chunk gets at most two repair rounds with new measurements and fresh
-reviews. New regressions may be reported. The passing-review fingerprint must still
-match the current tree; acceptance and ownership are checked again before the
-executor stages and commits the chunk. A no-op chunk is rejected.
+Every chunk receives one independent review and one direct correction pass. The
+corrected tree is remeasured once; acceptance and ownership are checked again before
+the executor stages and commits the chunk. There is no semantic re-review loop, and
+a no-op chunk is rejected.
 
 The final gate runs every approved acceptance command and `npm run check` on the
 assembled clean tree. Final failures stop; there is no automatic integration-repair

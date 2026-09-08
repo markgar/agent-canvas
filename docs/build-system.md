@@ -105,10 +105,10 @@ Human-reviewed invariants + complete approved feature + fresh repository
                          preflight
                               v
         plan -> mechanical checker -> fresh plan review
-          ^                              |
-          +------- bounded revision -----+  rejection blocks coding
-                              |
-                        lock reviewed plan
+                                             |
+                                     one direct plan fix
+                                             |
+                              validate and lock build plan
                               v
             1–8 chunks, sequential dependency order
        selected spec sections + check IDs -> builder
@@ -117,12 +117,13 @@ Human-reviewed invariants + complete approved feature + fresh repository
                               |
                  fresh reviewer, full feature
                               |
-             semantic pass AND checks AND scope?
-                 no                       yes
-       at most two repairs                 |
-       each remeasured/reviewed      recheck current tree
-                 |                         |
-         unresolved: stop          framework local commit
+                    one direct repair
+                           |
+               remeasure current tree
+                           |
+          objective checks and scope pass?
+               no                    yes
+        stop with evidence     framework local commit
                                            |
                                 next chunk / final gate
                                            |
@@ -131,22 +132,22 @@ Human-reviewed invariants + complete approved feature + fresh repository
                               human acceptance pending
 ```
 
-| Stage                 | Mechanism and evidence                                                                                            | Failure boundary                                                    |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Preflight             | Vendor verification, approval, clean tree, baseline freshness                                                     | Stop before model spend                                             |
-| Plan/check/review     | JSON plan; exact paths and section references; requirement/check coverage; independent behavioral review          | Invalid structure or rejected semantics cannot enter implementation |
-| Prepare/build         | Locked assignment and literal spec sections, including subsections                                                | No ownership expansion or self-approved contract changes            |
-| Measure/review/decide | Host-run commands, outputs, exit statuses, scope inventory, tree fingerprint; reviewer reads source and full spec | Both semantic and mechanical acceptance required                    |
-| Repair                | Concrete findings, same assignment, fresh measurements and review                                                 | At most two repairs; exhaustion stops                               |
-| Chunk gate/checkpoint | Matching reviewed fingerprint, repeated checks, no-op rejection                                                   | Only framework creates local checkpoint                             |
-| Final gate            | All approved feature commands and repository-wide `npm run check`                                                 | Integration failure stops; human acceptance remains separate        |
+| Stage                 | Mechanism and evidence                                                                                                             | Failure boundary                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Preflight             | Vendor verification, approval, clean tree, baseline freshness                                                                      | Stop before model spend                                      |
+| Plan/check/review/fix | JSON plan; exact paths and section references; requirement/check coverage; one independent review and direct fix                   | Invalid corrected structure cannot enter implementation      |
+| Prepare/build         | Locked assignment and literal spec sections, including subsections                                                                 | No ownership expansion or self-approved contract changes     |
+| Measure/review/fix    | Host-run commands, outputs, exit statuses, scope inventory, tree fingerprint; one bounded finding set goes directly to the builder | One repair pass without semantic re-review                   |
+| Chunk gate/checkpoint | Post-repair measured fingerprint, repeated checks, no-op rejection                                                                 | Only framework creates local checkpoint                      |
+| Final gate            | All approved feature commands and repository-wide `npm run check`                                                                  | Integration failure stops; human acceptance remains separate |
 
 The plan contains chunk `id`, `title`, `files`, `specRefs`, `requirementIds`,
 `checkIds`, and `blueprint`. Mechanical validation rejects duplicate paths within a chunk,
 invalid/protected paths, ambiguous section references, unknown IDs, and missing
 coverage. Mentioning every ID is not proof of behavioral coverage: a fresh reviewer
 must challenge the blueprint and whether chosen checks distinguish correct from
-incorrect behavior. The plan/review loop is bounded to two rounds.
+incorrect behavior. One direct correction pass preserves sound plan work, and the
+corrected artifact must pass mechanical validation before coding.
 
 Sequential chunks deliberately reject speculative parallelism. Earlier chunks are
 committed before later work begins. A later chunk may explicitly revisit a file
@@ -159,14 +160,14 @@ Builders receive precise sections rather than the planner's paraphrase alone.
 Reviewers receive the full feature so omitted context remains discoverable, while
 judging only the current assignment and regressions—not absent later chunks.
 Fresh context reduces dependence on the builder's explanation; it does not produce
-statistical independence. Fixers receive findings and measurements, and every repair
-gets a fresh review that can identify new regressions.
+statistical independence. Fixers receive the finite findings and measurements
+directly. The repair is remeasured but is not sent to another semantic reviewer.
 
-The executable [stage adapter](../.chainkit/scripts/stage.ts) combines reviewer
-acceptance with measured acceptance. Chunk measurements rebuild current artifacts, then run typechecking, baseline
+The executable [stage adapter](../.chainkit/scripts/stage.ts) records measured
+acceptance independently from reviewer advice. Chunk measurements rebuild current artifacts, then run typechecking, baseline
 regressions, selected approved checks and formatting; the chunk `gate` repeats
 measurement before checkpointing. A failed build cannot use old artifacts.
-Loop bounds use `max`. The final `gate` reruns every approved feature check plus
+The final `gate` reruns every approved feature check plus
 `npm run check` against the assembled clean tree. No final integration-repair loop
 is configured. There is no push, PR creation, merge, or automatic human approval.
 
@@ -211,22 +212,19 @@ behavior. Inventory hashes detect changes relative to the recorded pin; they do
 not prove upstream provenance. Human upgrade review and local compatibility tests
 remain necessary.
 
-Current defaults are `gpt-5.6-sol` for planning/building/fixing and
-`claude-opus-4.8` for review, with high effort and a 15-minute stage timeout.
-These are practical, editable defaults—not benchmark proof of model superiority
-or of cross-model independence. Budget includes spec review, planning retries,
-full-spec reviewer tokens, up to three build/review passes per chunk, repeated
-commands, and human acceptance. Bounded retries cap a failure mode; they are not
-a fixed monetary budget.
+Current stages use `gpt-5.6-sol-fast` with high effort and a 15-minute timeout.
+This is a practical, editable default—not benchmark proof of model superiority or
+cross-model independence. Budget includes spec review, one plan review and fix,
+one build review and fix per chunk, repeated commands, and human acceptance.
 
 The [operations guide](../.chainkit/README.md) separates free configuration
 validation, deterministic adapter tests, vendor self-tests, and explicit paid
 execution. Passing [offline replay integration tests](../.chainkit/scripts/engine.test.ts)
 exercise the actual YAML scheduling, wrapper, and gates. They demonstrate:
 
-- A passing chunk receives an automatic local checkpoint without unnecessary repair.
-- A rejected plan blocks implementation.
-- A still-rejected chunk exhausts bounded repairs without receiving a checkpoint.
+- A corrected, objectively passing chunk receives an automatic local checkpoint.
+- A reviewed plan receives one direct fix and must pass the final plan checker.
+- A chunk with post-repair objective failures receives no checkpoint.
 
 Model reply streams and the builder's edit are fixture substitutes. This is real
 executor integration evidence, not a paid model build, evidence of model reasoning

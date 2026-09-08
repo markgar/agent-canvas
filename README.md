@@ -11,9 +11,9 @@ sensitive content to this scaffold.
 
 ## Start locally
 
-Use Node.js 22.14+ (22.x) or 24.x and npm 10+. `.nvmrc` pins the default development
-runtime; routine CI uses Node.js 22 only. Node.js 24 remains a supported optional
-local compatibility check, not a second mandatory CI job.
+Use Node.js 22.14+ (22.x) and npm 10+. `.nvmrc` pins the supported development
+runtime and routine CI uses the same major version. Node.js 24 compatibility is
+deferred until a later explicit support pass.
 
 ```sh
 nvm use

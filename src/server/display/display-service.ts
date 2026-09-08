@@ -16,6 +16,7 @@ import {
   type ToolFailure,
   type ToolFailureCode,
 } from '../../contracts/display.js';
+import { sanitizeDisplayContent } from '../security/sanitize-display.js';
 
 const sanitizerResultSchema = z.strictObject({
   html: z.string(),
@@ -52,7 +53,7 @@ export interface DisplayServiceClock {
 }
 
 export interface DisplayServiceDependencies {
-  sanitizer: DisplaySanitizer;
+  sanitizer?: DisplaySanitizer;
   clock?: DisplayServiceClock;
   stateSeed?: DisplaySnapshot;
 }
@@ -123,6 +124,7 @@ export function createDisplayService(
   dependencies: DisplayServiceOptions,
 ): DisplayService {
   const clock = dependencies.clock ?? systemClock;
+  const sanitizer = dependencies.sanitizer ?? sanitizeDisplayContent;
   const publication =
     dependencies.publish === undefined
       ? undefined
@@ -209,7 +211,7 @@ export function createDisplayService(
           }
 
           const sanitizedResult = sanitizerResultSchema.safeParse(
-            await dependencies.sanitizer({
+            await sanitizer({
               html: parsedInput.data.html,
               css: parsedInput.data.css,
             }),

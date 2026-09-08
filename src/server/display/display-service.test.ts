@@ -61,6 +61,84 @@ function deferred() {
 }
 
 describe('createDisplayService', () => {
+  it('uses the production sanitizer when no test sanitizer is supplied', async () => {
+    const service = createDisplayService({
+      stateSeed: { instanceId, revision: 0, view: null },
+    });
+
+    await expect(
+      service.present({
+        title: 'Synthetic',
+        html: '<script>removed()</script><p style="color:red">Safe</p>',
+        css: 'p{position:fixed;background-color:blue}',
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        instanceId,
+        revision: 1,
+        warnings: ['active-content', 'unsupported-css'],
+      },
+    });
+    expect(service.getSnapshot()).toEqual({
+      instanceId,
+      revision: 1,
+      view: {
+        title: 'Synthetic',
+        html: '<p id="agent-canvas-inline-1">Safe</p>',
+        css: 'p{background-color:blue}#agent-canvas-inline-1{color:red}',
+      },
+    });
+  });
+
+  it('rejects metadata-only title content without mutating retained state', async () => {
+    const initialState: DisplaySnapshot = {
+      instanceId,
+      revision: 3,
+      view: { title: 'Existing', html: '<p>Existing</p>', css: '' },
+    };
+    const service = createDisplayService({ stateSeed: initialState });
+
+    expectFailure(
+      await service.present({
+        title: 'Metadata is not body text',
+        html: '<title>Metadata only</title>',
+      }),
+      'EMPTY_CONTENT',
+    );
+    expect(service.getSnapshot()).toEqual(initialState);
+  });
+
+  it('returns independent CSS warning categories in canonical order', async () => {
+    const service = createDisplayService({
+      stateSeed: { instanceId, revision: 0, view: null },
+    });
+
+    await expect(
+      service.present({
+        title: 'Synthetic',
+        html: '<p>Body</p>',
+        css: 'p{background-image:url("https://example.invalid/pixel")}',
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        instanceId,
+        revision: 1,
+        warnings: ['external-resource', 'unsupported-css'],
+      },
+    });
+    expect(service.getSnapshot()).toEqual({
+      instanceId,
+      revision: 1,
+      view: {
+        title: 'Synthetic',
+        html: '<p>Body</p>',
+        css: '',
+      },
+    });
+  });
+
   it('starts each unseeded instance at revision zero with a fresh UUID', () => {
     const first = createDisplayService({ sanitizer: createSanitizer() });
     const second = createDisplayService({ sanitizer: createSanitizer() });

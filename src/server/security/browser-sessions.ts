@@ -142,6 +142,11 @@ export class BrowserSessions {
     return true;
   }
 
+  validate(cookieHeader: string | undefined, port: number): boolean {
+    this.pruneExpired();
+    return this.#findRecord(cookieHeader, port) !== undefined;
+  }
+
   openStream(
     cookieHeader: string | undefined,
     port: number,

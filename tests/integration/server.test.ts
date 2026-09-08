@@ -3,8 +3,37 @@ import { chromium, type Browser } from 'playwright';
 
 import { healthResponseSchema } from '../../src/contracts/health.js';
 import { readConfig } from '../../src/server/config.js';
+import { createDisplayService } from '../../src/server/display/display-service.js';
 import { createServer } from '../../src/server/http/create-server.js';
 import { BrowserSessions } from '../../src/server/security/browser-sessions.js';
+
+async function readSseEvent(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: { buffer: string },
+): Promise<string> {
+  const decoder = new TextDecoder();
+  while (!state.buffer.includes('\n\n')) {
+    const result = await reader.read();
+    if (result.done) {
+      throw new Error('SSE stream ended before a complete event.');
+    }
+    state.buffer += decoder.decode(result.value, { stream: true });
+  }
+  const boundary = state.buffer.indexOf('\n\n');
+  const event = state.buffer.slice(0, boundary + 2);
+  state.buffer = state.buffer.slice(boundary + 2);
+  return event;
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('Timed out waiting for the integration condition.');
+}
 
 describe('HTTP listener', () => {
   const servers: ReturnType<typeof createServer>[] = [];
@@ -173,4 +202,77 @@ describe('HTTP listener', () => {
       'The local Agent Canvas session could not be established.',
     );
   }, 25_000);
+
+  it('publishes authenticated snapshots and observable heartbeat events over the real listener', async () => {
+    let fill = 30;
+    const sessions = new BrowserSessions({
+      randomBytes: (size) => new Uint8Array(size).fill(fill++),
+    });
+    const displayService = createDisplayService({
+      stateSeed: {
+        instanceId: '123e4567-e89b-42d3-a456-426614174000',
+        revision: 0,
+        view: null,
+      },
+    });
+    const config = readConfig({});
+    const server = createServer(config, { sessions, displayService });
+    servers.push(server);
+    const address = await server.listen(config);
+    const port = Number(new URL(address).port);
+    const bootstrap = sessions.bootstrap(
+      sessions.bootstrapToken,
+      undefined,
+      port,
+    );
+    expect(bootstrap.status).toBe('created');
+    if (bootstrap.status !== 'created') {
+      throw new Error('Expected a browser session.');
+    }
+    const cookie = bootstrap.setCookie.split(';', 1)[0] ?? '';
+    const controller = new AbortController();
+    const response = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    if (response.body === null) {
+      throw new Error('Expected an SSE response body.');
+    }
+    const reader = response.body.getReader();
+    const state = { buffer: '' };
+
+    const initial = await readSseEvent(reader, state);
+    expect(initial).toBe(
+      'event: snapshot\n' +
+        'id: 123e4567-e89b-42d3-a456-426614174000:0\n' +
+        'data: {"instanceId":"123e4567-e89b-42d3-a456-426614174000","revision":0,"view":null}\n\n',
+    );
+    expect(initial).not.toContain(sessions.bootstrapToken);
+    expect(initial).not.toContain(cookie);
+
+    const heartbeatStarted = performance.now();
+    expect(await readSseEvent(reader, state)).toBe(
+      'event: heartbeat\ndata: {}\n\n',
+    );
+    const heartbeatElapsed = performance.now() - heartbeatStarted;
+    expect(heartbeatElapsed).toBeGreaterThanOrEqual(4_500);
+    expect(heartbeatElapsed).toBeLessThan(7_000);
+
+    await expect(
+      displayService.present({
+        title: 'Synthetic update',
+        html: '<p>Synthetic integration body</p>',
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { revision: 1 } });
+    expect(await readSseEvent(reader, state)).toBe(
+      'event: snapshot\n' +
+        'id: 123e4567-e89b-42d3-a456-426614174000:1\n' +
+        'data: {"instanceId":"123e4567-e89b-42d3-a456-426614174000","revision":1,"view":{"title":"Synthetic update","html":"<p>Synthetic integration body</p>","css":""}}\n\n',
+    );
+
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+    await waitForCondition(() => sessions.activeStreamCount === 0);
+  }, 15_000);
 });

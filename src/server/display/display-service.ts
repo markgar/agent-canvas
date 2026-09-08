@@ -58,24 +58,22 @@ export interface DisplayServiceDependencies {
   stateSeed?: DisplaySnapshot;
 }
 
-type DisplayPublicationDependencies =
-  | {
-      publish?: undefined;
-      onPublicationFailure?: undefined;
-    }
-  | {
-      publish: (snapshot: DisplaySnapshot) => void;
-      onPublicationFailure: () => void;
-    };
-
-export type DisplayServiceOptions = DisplayServiceDependencies &
-  DisplayPublicationDependencies;
-
 export type MutationOutcome =
   { ok: true; result: MutationResult } | { ok: false; failure: ToolFailure };
 
+export interface DisplaySubscriber {
+  publish(snapshot: DisplaySnapshot): void;
+  close(): void;
+}
+
+export interface DisplaySubscription {
+  snapshot: DisplaySnapshot;
+  unsubscribe(): void;
+}
+
 export interface DisplayService {
   getSnapshot(): DisplaySnapshot;
+  subscribe(subscriber: DisplaySubscriber): Promise<DisplaySubscription>;
   present(input: unknown): Promise<MutationOutcome>;
   clear(input: unknown): Promise<MutationOutcome>;
 }
@@ -121,17 +119,11 @@ function canonicalWarnings(
 }
 
 export function createDisplayService(
-  dependencies: DisplayServiceOptions,
+  dependencies: DisplayServiceDependencies,
 ): DisplayService {
   const clock = dependencies.clock ?? systemClock;
   const sanitizer = dependencies.sanitizer ?? sanitizeDisplayContent;
-  const publication =
-    dependencies.publish === undefined
-      ? undefined
-      : {
-          publish: dependencies.publish,
-          onFailure: dependencies.onPublicationFailure,
-        };
+  const subscribers = new Set<DisplaySubscriber>();
   let snapshot = displaySnapshotSchema.parse(
     dependencies.stateSeed ?? {
       instanceId: randomUUID(),
@@ -142,21 +134,27 @@ export function createDisplayService(
   let operationQueue = Promise.resolve();
 
   const publish = (retainedSnapshot: DisplaySnapshot): void => {
-    if (publication === undefined) {
-      return;
+    for (const subscriber of [...subscribers]) {
+      const publishedSnapshot = cloneSnapshot(retainedSnapshot);
+      queueMicrotask(() => {
+        if (!subscribers.has(subscriber)) {
+          return;
+        }
+        try {
+          subscriber.publish(publishedSnapshot);
+        } catch {
+          subscribers.delete(subscriber);
+          try {
+            subscriber.close();
+          } catch {
+            // The failed subscriber is already detached.
+          }
+        }
+      });
     }
-
-    const publishedSnapshot = cloneSnapshot(retainedSnapshot);
-    queueMicrotask(() => {
-      try {
-        publication.publish(publishedSnapshot);
-      } catch {
-        publication.onFailure();
-      }
-    });
   };
 
-  const enqueue = (operation: () => Promise<MutationOutcome>) => {
+  const enqueue = <Result>(operation: () => Result | Promise<Result>) => {
     const result = operationQueue.then(operation);
     operationQueue = result.then(
       () => undefined,
@@ -191,6 +189,23 @@ export function createDisplayService(
   return {
     getSnapshot() {
       return cloneSnapshot(snapshot);
+    },
+
+    subscribe(subscriber) {
+      return enqueue(() => {
+        subscribers.add(subscriber);
+        let subscribed = true;
+        return {
+          snapshot: cloneSnapshot(snapshot),
+          unsubscribe() {
+            if (!subscribed) {
+              return;
+            }
+            subscribed = false;
+            subscribers.delete(subscriber);
+          },
+        };
+      });
     },
 
     present(input) {

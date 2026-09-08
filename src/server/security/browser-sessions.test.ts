@@ -126,6 +126,23 @@ describe('BrowserSessions', () => {
     expect(sessions.sessionCount).toBe(0);
   });
 
+  it('validates a cookie without extending its idle lifetime', () => {
+    let now = 0;
+    const sessions = new BrowserSessions({
+      randomBytes: incrementingRandom(),
+      now: () => now,
+      idleTimeoutMs: 1_000,
+    });
+    const cookie = createdCookie(sessions);
+
+    now = 999;
+    expect(sessions.validate(cookie, 3000)).toBe(true);
+    expect(sessions.activeStreamCount).toBe(0);
+    now = 1_000;
+    expect(sessions.validate(cookie, 3000)).toBe(false);
+    expect(sessions.sessionCount).toBe(0);
+  });
+
   it('expires idle sessions at the exact elapsed-time boundary', () => {
     let now = 100;
     const sessions = new BrowserSessions({

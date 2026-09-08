@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { healthResponseSchema } from '../../contracts/health.js';
+import { createDisplayService } from '../display/display-service.js';
 import { BrowserSessions } from '../security/browser-sessions.js';
 import { createServer } from './create-server.js';
 
@@ -10,6 +11,25 @@ const origin = 'http://127.0.0.1:3000';
 function incrementingRandom(start = 1) {
   let value = start;
   return (size: number) => new Uint8Array(size).fill(value++);
+}
+
+function createCookie(sessions: BrowserSessions, port: number): string {
+  const result = sessions.bootstrap(sessions.bootstrapToken, undefined, port);
+  expect(result.status).toBe('created');
+  if (result.status !== 'created') {
+    throw new Error('Expected a browser session.');
+  }
+  return result.setCookie.split(';', 1)[0] ?? '';
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('Timed out waiting for the server condition.');
 }
 
 describe('createServer', () => {
@@ -334,6 +354,357 @@ describe('createServer', () => {
     });
     expect(reuse.statusCode).toBe(204);
     expect(reuse.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('streams the latest full snapshot first with exact SSE headers and framing', async () => {
+    await server.close();
+    const displayService = createDisplayService({
+      stateSeed: {
+        instanceId: '123e4567-e89b-42d3-a456-426614174000',
+        revision: 7,
+        view: {
+          title: 'Synthetic',
+          html: '<p>Synthetic body</p>',
+          css: 'p{color:navy}',
+        },
+      },
+    });
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        displayService,
+        connectionLimit: 1,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const cookie = createCookie(sessions, port);
+    const controller = new AbortController();
+
+    const response = await fetch(`${address}/events`, {
+      headers: {
+        Cookie: cookie,
+        'Last-Event-ID': '123e4567-e89b-42d3-a456-426614174000:999',
+      },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe(
+      'text/event-stream; charset=utf-8',
+    );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('x-accel-buffering')).toBe('no');
+    expect(response.headers.get('content-encoding')).toBeNull();
+
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    const first = await reader?.read();
+    expect(new TextDecoder().decode(first?.value)).toBe(
+      'event: snapshot\n' +
+        'id: 123e4567-e89b-42d3-a456-426614174000:7\n' +
+        'data: {"instanceId":"123e4567-e89b-42d3-a456-426614174000","revision":7,"view":{"title":"Synthetic","html":"<p>Synthetic body</p>","css":"p{color:navy}"}}\n\n',
+    );
+
+    controller.abort();
+    await reader?.cancel().catch(() => undefined);
+    await waitForCondition(() => sessions.activeStreamCount === 0);
+  });
+
+  it('authenticates before enforcing the global connection cap and counts repeated-cookie streams', async () => {
+    await server.close();
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        connectionLimit: 2,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const cookie = createCookie(sessions, port);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    const first = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+      signal: firstController.signal,
+    });
+    const second = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+      signal: secondController.signal,
+    });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(sessions.activeStreamCount).toBe(2);
+
+    const unauthenticated = await fetch(`${address}/events`);
+    expect(unauthenticated.status).toBe(401);
+    const unauthenticatedBody = await unauthenticated.text();
+    expect(JSON.parse(unauthenticatedBody)).toEqual({
+      error: 'UNAUTHORIZED',
+    });
+
+    const forbidden = await fetch(`${address}/events`, {
+      headers: { Origin: 'https://attacker.example' },
+    });
+    expect(forbidden.status).toBe(403);
+    const forbiddenBody = await forbidden.text();
+    expect(JSON.parse(forbiddenBody)).toEqual({ error: 'FORBIDDEN' });
+
+    const atCapacity = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+    });
+    expect(atCapacity.status).toBe(429);
+    const atCapacityBody = await atCapacity.text();
+    expect(JSON.parse(atCapacityBody)).toEqual({
+      error: 'CONNECTION_LIMIT',
+    });
+    expect(atCapacity.headers.get('cache-control')).toBe('no-store');
+    const failureBodies = [
+      unauthenticatedBody,
+      forbiddenBody,
+      atCapacityBody,
+    ].join(' ');
+    expect(failureBodies).not.toContain(sessions.bootstrapToken);
+    expect(failureBodies).not.toContain(cookie);
+
+    firstController.abort();
+    await first.body?.cancel().catch(() => undefined);
+    await waitForCondition(() => sessions.activeStreamCount === 1);
+    secondController.abort();
+    await second.body?.cancel().catch(() => undefined);
+    await waitForCondition(() => sessions.activeStreamCount === 0);
+  });
+
+  it('does not extend an idle session when capacity rejects its valid cookie', async () => {
+    await server.close();
+    let now = 0;
+    sessions = new BrowserSessions({
+      randomBytes: incrementingRandom(70),
+      now: () => now,
+      idleTimeoutMs: 1_000,
+    });
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        connectionLimit: 1,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const activeCookie = createCookie(sessions, port);
+    const rejectedCookie = createCookie(sessions, port);
+    const controller = new AbortController();
+
+    now = 999;
+    const active = await fetch(`${address}/events`, {
+      headers: { Cookie: activeCookie },
+      signal: controller.signal,
+    });
+    expect(active.status).toBe(200);
+    expect(sessions.activeStreamCount).toBe(1);
+
+    const rejected = await fetch(`${address}/events`, {
+      headers: { Cookie: rejectedCookie },
+    });
+    expect(rejected.status).toBe(429);
+    expect(await rejected.json()).toEqual({ error: 'CONNECTION_LIMIT' });
+
+    now = 1_000;
+    sessions.pruneExpired();
+    expect(sessions.sessionCount).toBe(1);
+    expect(sessions.validate(rejectedCookie, port)).toBe(false);
+
+    controller.abort();
+    await active.body?.cancel().catch(() => undefined);
+    await waitForCondition(() => sessions.activeStreamCount === 0);
+  });
+
+  it('returns a content-free 503 and releases the slot when subscription fails before streaming', async () => {
+    await server.close();
+    let now = 0;
+    sessions = new BrowserSessions({
+      randomBytes: incrementingRandom(80),
+      now: () => now,
+      idleTimeoutMs: 1_000,
+    });
+    const displayService = createDisplayService({});
+    vi.spyOn(displayService, 'subscribe').mockRejectedValueOnce(
+      new Error('sensitive internal subscription detail'),
+    );
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        displayService,
+        connectionLimit: 1,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const cookie = createCookie(sessions, port);
+
+    now = 999;
+    const response = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'UNAVAILABLE' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(sessions.activeStreamCount).toBe(0);
+    now = 1_000;
+    sessions.pruneExpired();
+    expect(sessions.sessionCount).toBe(0);
+  });
+
+  it('keeps pending setup outside the accepted count and idle lifetime', async () => {
+    await server.close();
+    let now = 0;
+    sessions = new BrowserSessions({
+      randomBytes: incrementingRandom(90),
+      now: () => now,
+      idleTimeoutMs: 1_000,
+    });
+    const displayService = createDisplayService({});
+    const subscribe = displayService.subscribe.bind(displayService);
+    let continueSubscription!: () => void;
+    const subscriptionBarrier = new Promise<void>((resolve) => {
+      continueSubscription = resolve;
+    });
+    const subscribeSpy = vi
+      .spyOn(displayService, 'subscribe')
+      .mockImplementation(async (subscriber) => {
+        await subscriptionBarrier;
+        return subscribe(subscriber);
+      });
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        displayService,
+        connectionLimit: 1,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const cookie = createCookie(sessions, port);
+    const controller = new AbortController();
+    now = 999;
+    const response = fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+      signal: controller.signal,
+    }).catch(() => undefined);
+
+    await waitForCondition(() => subscribeSpy.mock.calls.length === 1);
+    expect(sessions.activeStreamCount).toBe(0);
+    const atReservedCapacity = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+    });
+    expect(atReservedCapacity.status).toBe(429);
+    expect(await atReservedCapacity.json()).toEqual({
+      error: 'CONNECTION_LIMIT',
+    });
+    expect(sessions.activeStreamCount).toBe(0);
+    controller.abort();
+    await response;
+    expect(sessions.activeStreamCount).toBe(0);
+    now = 1_000;
+    sessions.pruneExpired();
+    expect(sessions.sessionCount).toBe(0);
+
+    continueSubscription();
+    await Promise.resolve();
+    expect(sessions.activeStreamCount).toBe(0);
+  });
+
+  it('cancels pending stream setup during server shutdown', async () => {
+    await server.close();
+    const displayService = createDisplayService({});
+    const subscribe = displayService.subscribe.bind(displayService);
+    let continueSubscription!: () => void;
+    const subscriptionBarrier = new Promise<void>((resolve) => {
+      continueSubscription = resolve;
+    });
+    const subscribeSpy = vi
+      .spyOn(displayService, 'subscribe')
+      .mockImplementation(async (subscriber) => {
+        await subscriptionBarrier;
+        return subscribe(subscriber);
+      });
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        displayService,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const cookie = createCookie(sessions, port);
+    const response = fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+    }).catch(() => undefined);
+
+    await waitForCondition(() => subscribeSpy.mock.calls.length === 1);
+    expect(sessions.activeStreamCount).toBe(0);
+    await expect(server.close()).resolves.toBeUndefined();
+    expect(sessions.activeStreamCount).toBe(0);
+
+    continueSubscription();
+    await response;
+    expect(sessions.activeStreamCount).toBe(0);
+  });
+
+  it('keeps accepted streams live and starts idleness when the last closes', async () => {
+    await server.close();
+    let now = 0;
+    sessions = new BrowserSessions({
+      randomBytes: incrementingRandom(100),
+      now: () => now,
+      idleTimeoutMs: 1_000,
+    });
+    server = createServer(
+      { host: '127.0.0.1', port: 0 },
+      {
+        sessions,
+        assets: { javascript: '', css: '' },
+      },
+    );
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const port = Number(new URL(address).port);
+    const cookie = createCookie(sessions, port);
+    const controller = new AbortController();
+
+    now = 999;
+    const response = await fetch(`${address}/events`, {
+      headers: { Cookie: cookie },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(sessions.activeStreamCount).toBe(1);
+
+    now = 10_000;
+    sessions.pruneExpired();
+    expect(sessions.sessionCount).toBe(1);
+
+    controller.abort();
+    await response.body?.cancel().catch(() => undefined);
+    await waitForCondition(() => sessions.activeStreamCount === 0);
+    now = 10_999;
+    sessions.pruneExpired();
+    expect(sessions.sessionCount).toBe(1);
+    now = 11_000;
+    sessions.pruneExpired();
+    expect(sessions.sessionCount).toBe(0);
   });
 
   it.each([

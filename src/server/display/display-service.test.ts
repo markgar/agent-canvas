@@ -501,16 +501,18 @@ describe('createDisplayService', () => {
     const delivery = deferred();
     const published: DisplaySnapshot[] = [];
     let pendingDelivery: Promise<void> | undefined;
-    const publish = vi.fn((snapshot: DisplaySnapshot) => {
-      published.push(snapshot);
-      pendingDelivery = delivery.promise;
-    });
+    const subscriber = {
+      publish: vi.fn((snapshot: DisplaySnapshot) => {
+        published.push(snapshot);
+        pendingDelivery = delivery.promise;
+      }),
+      close: vi.fn(),
+    };
     const service = createDisplayService({
       sanitizer: createSanitizer(),
       stateSeed: { instanceId, revision: 0, view: null },
-      publish,
-      onPublicationFailure: vi.fn(),
     });
+    await service.subscribe(subscriber);
 
     const outcome = await service.present({
       title: 'Published',
@@ -519,31 +521,99 @@ describe('createDisplayService', () => {
 
     expect(outcome).toMatchObject({ ok: true, result: { revision: 1 } });
     expect(service.getSnapshot().revision).toBe(1);
-    expect(publish).toHaveBeenCalledOnce();
+    expect(subscriber.publish).toHaveBeenCalledOnce();
     expect(published[0]).toEqual(service.getSnapshot());
     expect(pendingDelivery).toBe(delivery.promise);
+    expect(subscriber.close).not.toHaveBeenCalled();
     delivery.resolve();
   });
 
-  it('keeps accepted state when deferred publication throws', async () => {
-    const onPublicationFailure = vi.fn();
+  it('keeps accepted state and closes only the failed subscriber', async () => {
+    const failedSubscriber = {
+      publish: vi.fn(() => {
+        throw new Error('writer failed');
+      }),
+      close: vi.fn(),
+    };
+    const healthySubscriber = {
+      publish: vi.fn(),
+      close: vi.fn(),
+    };
     const service = createDisplayService({
       sanitizer: createSanitizer(),
       stateSeed: { instanceId, revision: 0, view: null },
-      publish() {
-        throw new Error('writer failed');
-      },
-      onPublicationFailure,
     });
+    await service.subscribe(failedSubscriber);
+    await service.subscribe(healthySubscriber);
 
     await expect(
       service.present({ title: 'Retained', html: '<p>Retained</p>' }),
     ).resolves.toMatchObject({ ok: true, result: { revision: 1 } });
     await Promise.resolve();
-    expect(onPublicationFailure).toHaveBeenCalledOnce();
+    expect(failedSubscriber.close).toHaveBeenCalledOnce();
+    expect(healthySubscriber.publish).toHaveBeenCalledOnce();
+    expect(healthySubscriber.close).not.toHaveBeenCalled();
     expect(service.getSnapshot()).toMatchObject({
       revision: 1,
       view: { title: 'Retained' },
+    });
+
+    await service.clear({});
+    await Promise.resolve();
+    expect(failedSubscriber.publish).toHaveBeenCalledOnce();
+    expect(healthySubscriber.publish).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes subscriber capture with mutations without a missed-update gap', async () => {
+    const firstTurn = deferred();
+    let turns = 0;
+    const received: DisplaySnapshot[] = [];
+    const service = createDisplayService({
+      sanitizer: createSanitizer(),
+      stateSeed: { instanceId, revision: 0, view: null },
+      clock: {
+        waitForTurn() {
+          turns += 1;
+          return turns === 1 ? firstTurn.promise : undefined;
+        },
+      },
+    });
+
+    const firstMutation = service.present({
+      title: 'First',
+      html: '<p>First</p>',
+    });
+    const subscriptionPromise = service.subscribe({
+      publish(snapshot) {
+        received.push(snapshot);
+      },
+      close: vi.fn(),
+    });
+    const secondMutation = service.present({
+      title: 'Second',
+      html: '<p>Second</p>',
+    });
+
+    firstTurn.resolve();
+    await expect(firstMutation).resolves.toMatchObject({
+      ok: true,
+      result: { revision: 1 },
+    });
+    const subscription = await subscriptionPromise;
+    await expect(secondMutation).resolves.toMatchObject({
+      ok: true,
+      result: { revision: 2 },
+    });
+    await Promise.resolve();
+
+    expect(subscription.snapshot).toMatchObject({
+      revision: 1,
+      view: { title: 'First' },
+    });
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      revision: 2,
+      view: { title: 'Second' },
     });
   });
 

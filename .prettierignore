@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+vendor/
+.chainkit/results/
+.chainkit/runtime/
+.chainkit/vendor.json
+package-lock.json

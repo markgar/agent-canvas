@@ -1,0 +1,137 @@
+name: agent-canvas-feature
+
+seeds:
+  spec: 'NO SPEC SELECTED: use npm run chainkit:run with an approved feature.'
+  productRules: '@../governance/product.md'
+  planningRules: '@../governance/planning.md'
+  codingRules: '@../governance/coding.md'
+  reviewingRules: '@../governance/reviewing.md'
+  planVerdict: 'No prior review. Produce the initial plan.'
+
+defaults:
+  model: gpt-5.6-sol
+  effort: high
+  timeoutMs: 900000
+
+preflight:
+  run: node --import tsx .chainkit/scripts/stage.ts preflight
+
+stages:
+  - id: plan
+    prompt: ../prompts/plan.md
+    tools: true
+    produces: plan
+    parse: json
+    expects: { chunks: array }
+    completion:
+      run: node --import tsx .chainkit/scripts/stage.ts check-plan
+      max: 2
+
+  - id: plan-review
+    prompt: ../prompts/plan-review.md
+    model: claude-opus-4.8
+    tools: true
+    produces: planReview
+    parse: json
+    expects: { pass: boolean, findings: array }
+
+  - id: plan-decision
+    run: 'node --import tsx .chainkit/scripts/stage.ts plan-decision # reads planReview and plan via CHAINKIT_ARTIFACTS'
+    produces: planVerdict
+    parse: json
+    expects: { pass: boolean, findings: array }
+
+  - id: lock-plan
+    run: node --import tsx .chainkit/scripts/stage.ts lock-plan
+
+  - id: prepare
+    run: node --import tsx .chainkit/scripts/stage.ts prepare
+    produces: chunkSpec
+
+  - id: code
+    prompt: ../prompts/code.md
+    tools: true
+    produces: buildNotes
+
+  - id: measure
+    run: node --import tsx .chainkit/scripts/stage.ts measure
+    produces: facts
+    parse: json
+    expects:
+      { pass: boolean, fingerprint: string, outOfScope: array, checks: array }
+
+  - id: initial-review
+    prompt: ../prompts/review.md
+    model: claude-opus-4.8
+    tools: true
+    produces: review
+    parse: json
+    expects: { pass: boolean, findings: array }
+
+  - id: decide
+    run: 'node --import tsx .chainkit/scripts/stage.ts decide # reads review and facts via CHAINKIT_ARTIFACTS'
+    produces: verdict
+    parse: json
+    expects: { pass: boolean, findings: array }
+
+  - id: fix
+    prompt: ../prompts/fix.md
+    tools: true
+    resume: true
+    produces: repairNotes
+
+  - id: remeasure
+    run: node --import tsx .chainkit/scripts/stage.ts measure
+    produces: facts
+    parse: json
+    expects:
+      { pass: boolean, fingerprint: string, outOfScope: array, checks: array }
+
+  - id: repair-review
+    prompt: ../prompts/repair-review.md
+    model: claude-opus-4.8
+    tools: true
+    produces: review
+    parse: json
+    expects: { pass: boolean, findings: array }
+
+  - id: redecide
+    run: 'node --import tsx .chainkit/scripts/stage.ts decide # reads review and facts via CHAINKIT_ARTIFACTS'
+    produces: verdict
+    parse: json
+    expects: { pass: boolean, findings: array }
+
+loop:
+  stages: [plan, plan-review, plan-decision]
+  until: planVerdict.pass
+  max: 2
+
+foreach:
+  over: plan.chunks
+  as: chunk
+  max: 8
+  expects:
+    id: string
+    title: string
+    files: array
+    specRefs: array
+    requirementIds: array
+    checkIds: array
+    blueprint: string
+  stages:
+    - prepare
+    - code
+    - measure
+    - initial-review
+    - decide
+    - fix
+    - remeasure
+    - repair-review
+    - redecide
+  loop:
+    stages: [fix, remeasure, repair-review, redecide]
+    until: verdict.pass
+    max: 2
+  gate: node --import tsx .chainkit/scripts/stage.ts chunk-gate
+
+gate: node --import tsx .chainkit/scripts/stage.ts final-gate

@@ -9,7 +9,7 @@ seeds:
   planVerdict: 'No prior review. Produce the initial plan.'
 
 defaults:
-  model: gpt-5.6-sol
+  model: gpt-5.6-sol-fast
   effort: high
   timeoutMs: 900000
 
@@ -29,7 +29,7 @@ stages:
 
   - id: plan-review
     prompt: ../prompts/plan-review.md
-    model: claude-opus-4.8
+    model: gpt-5.6-sol-fast
     tools: true
     produces: planReview
     parse: json
@@ -62,7 +62,7 @@ stages:
 
   - id: initial-review
     prompt: ../prompts/review.md
-    model: claude-opus-4.8
+    model: gpt-5.6-sol-fast
     tools: true
     produces: review
     parse: json
@@ -89,7 +89,7 @@ stages:
 
   - id: repair-review
     prompt: ../prompts/repair-review.md
-    model: claude-opus-4.8
+    model: gpt-5.6-sol-fast
     tools: true
     produces: review
     parse: json

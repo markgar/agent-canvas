@@ -1,10 +1,10 @@
 ---
 id: 001-live-display
 title: Live read-only display
-status: draft
-base_commit: 2523c4235a81fb450a1cc3f8dae117f6dbdb1066
-approved_by: null
-approved_at: null
+status: approved
+base_commit: 245113b71b85071bb4e0e635c182cd0f4ebd021b
+approved_by: Mark Garner
+approved_at: 2026-09-08T19:48:53Z
 checks:
   - id: scaffold-types
     command: [npm, run, typecheck]

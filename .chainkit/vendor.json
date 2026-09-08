@@ -1,6 +1,6 @@
 {
   "repository": "markgar/chainkit",
-  "revision": "2ec2c6fcdc609d7181d56556f2b7b638ff3ddd04",
+  "revision": "ecda1dbef9a8771824b984493751bacd2d79fccb",
   "license": "MIT",
   "files": {
     ".github/workflows/ci.yml": {
@@ -268,7 +268,7 @@
       "executable": false
     },
     "kernel/models.mjs": {
-      "sha256": "ffb255ca015f5de0310e83a15f796b3389b4f663180f6bf91021454931f05fcc",
+      "sha256": "80c11a9f6035ea28d9806a5efaa514867e1059a3573bef666ba58b044e01eeb6",
       "executable": false
     },
     "kernel/providers.mjs": {

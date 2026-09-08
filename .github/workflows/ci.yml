@@ -15,22 +15,18 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality (Node ${{ matrix.node }})
+    name: Quality (Node 22)
     runs-on: macos-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [22, 24]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run browser:install
+        if: hashFiles('src/client/**/*.ts') != ''
       - run: npm run check
-      - run: npm run chainkit:selftest

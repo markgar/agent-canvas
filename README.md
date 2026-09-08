@@ -12,7 +12,8 @@ sensitive content to this scaffold.
 ## Start locally
 
 Use Node.js 22.14+ (22.x) or 24.x and npm 10+. `.nvmrc` pins the default development
-runtime; CI exercises both supported Node.js major versions.
+runtime; routine CI uses Node.js 22 only. Node.js 24 remains a supported optional
+local compatibility check, not a second mandatory CI job.
 
 ```sh
 nvm use
@@ -99,8 +100,9 @@ and an explicitly authorized launch. Feature tests can be written with each
 implementation chunk; a complete prewritten test harness is not a prerequisite.
 The shared browser build tools are present without a browser UI. Install the pinned
 Chromium binary with `npm run browser:install` before browser acceptance.
-CI uses macOS for both supported Node versions so future browser assertions run
-on the feature's supported platform rather than being skipped on Linux.
+CI uses one macOS/Node.js 22 job and installs Chromium only when browser source
+exists. It runs `npm run check`; vendored Chainkit self-tests remain available
+through `npm run chainkit:selftest` rather than running on every change.
 
 `npm run chainkit:validate` checks the vendor pin, spec structure, and chain wiring
 without calling a model. `npm run chainkit:selftest` runs upstream offline tests.

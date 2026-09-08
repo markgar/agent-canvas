@@ -1,28 +1,28 @@
 import { readConfig } from './config.js';
-import { createServer } from './http/create-server.js';
+import { createRuntime } from './runtime.js';
 
 function reportFailure(error: unknown): void {
-  console.error(error);
+  console.error(
+    error instanceof Error ? error.message : 'Agent Canvas operation failed.',
+  );
   process.exitCode = 1;
 }
 
 async function main(): Promise<void> {
   const config = readConfig(process.env);
-  const server = createServer(config);
-  const address = await server.listen(config);
+  const runtime = createRuntime(config, {
+    onProtocolError() {
+      console.error('Agent Canvas MCP protocol or transport error.');
+    },
+  });
+  const address = await runtime.start();
 
   console.error(`Agent Canvas listening at ${address}`);
-  console.error(
-    'Scaffold only: GET /health is available; display and MCP are not implemented.',
-  );
 
-  let stopping = false;
+  let shutdownPromise: Promise<void> | undefined;
   const shutdown = async (): Promise<void> => {
-    if (stopping) {
-      return;
-    }
-    stopping = true;
-    await server.close();
+    shutdownPromise ??= runtime.close();
+    await shutdownPromise;
   };
 
   process.once('SIGINT', () => {
@@ -31,6 +31,12 @@ async function main(): Promise<void> {
   process.once('SIGTERM', () => {
     void shutdown().catch(reportFailure);
   });
+  process.stdin.once('end', () => {
+    void shutdown().catch(reportFailure);
+  });
+  if (process.stdin.readableEnded) {
+    await shutdown();
+  }
 }
 
 void main().catch(reportFailure);

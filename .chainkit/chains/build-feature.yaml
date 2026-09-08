@@ -13,7 +13,7 @@ defaults:
   effort: high
   timeoutMs: 900000
 
-preflight:
+requires:
   run: node --import tsx .chainkit/scripts/stage.ts preflight
 
 stages:
@@ -25,7 +25,7 @@ stages:
     expects: { chunks: array }
     completion:
       run: node --import tsx .chainkit/scripts/stage.ts check-plan
-      max: 2
+      attempts: 2
 
   - id: plan-review
     prompt: ../prompts/plan-review.md
@@ -132,6 +132,10 @@ foreach:
     stages: [fix, remeasure, repair-review, redecide]
     until: verdict.pass
     max: 2
-  gate: node --import tsx .chainkit/scripts/stage.ts chunk-gate
+  completion:
+    run: node --import tsx .chainkit/scripts/stage.ts chunk-gate
+    attempts: 1
 
-gate: node --import tsx .chainkit/scripts/stage.ts final-gate
+completion:
+  run: node --import tsx .chainkit/scripts/stage.ts final-gate
+  attempts: 1

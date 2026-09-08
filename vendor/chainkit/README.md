@@ -1,6 +1,6 @@
 # chainkit
 
-A generic engine for running **configured chains of model stages**. The kernel calls the CLI, renders prompts, gathers telemetry, records the run, and runs the declared gate. **Which** models, in **which** order, with **which** prompts is config.
+A generic engine for running **configured chains of model stages**. The kernel calls the CLI, renders prompts, gathers telemetry, records the run, and enforces optional completion contracts. **Which** models, in **which** order, with **which** prompts is config.
 
 Adding a stage is a config edit, not a code change.
 
@@ -35,7 +35,7 @@ loop:
   max: 3
 ```
 
-A `run` stage takes no `model`, `effort`, `tools` or `resume`, and the config is **rejected** if it carries one rather than ignoring it: `run: pnpm format` alongside `model: claude-opus-5` is an author who believes a model is involved, and a run record showing a model that never ran is unreadable next to one that did. For the same reason chain `defaults.model` is not folded into it.
+A `run` stage takes no `model`, `effort`, `tools`, `resume`, `resumeFrom`, or `resumePrompt`, and the config is **rejected** if it carries one rather than ignoring it: `run: pnpm format` alongside `model: claude-opus-5` is an author who believes a model is involved, and a run record showing a model that never ran is unreadable next to one that did. For the same reason chain `defaults.model` is not folded into it.
 
 When a command exists only to decide whether a model stage has finished its own work, it is **not a stage**. Attach it as that stage's bounded completion rule:
 
@@ -47,10 +47,27 @@ When a command exists only to decide whether a model stage has finished its own 
   resume: true
   completion:
     run: pnpm test && pnpm check
-    max: 3
+    attempts: 3
 ```
 
-Chainkit appends this requirement to the stage's initial prompt, then runs the command independently after every turn. A failure is captured and sent back to the same stage; with `resume: true`, the same CLI conversation continues with the exact error. The stage cannot finish until the command passes. It halts on the declared bound, on a repeated failure with no file change, or if the supposedly read-only completion command changes the repository, index, or HEAD.
+Chainkit appends this requirement to the stage's initial prompt, then runs the command independently after every turn. A failure is captured and sent back to the same stage. With `resume: true`, later completion attempts continue the same CLI conversation with only a compact message containing the exact frozen command, attempt number, bounded failure output, and an instruction to return a complete replacement answer without repeating discovery. With `resume: false`, each retry is fresh and therefore receives the full initial prompt plus the failure context. Provider transport retries remain identical request retries because they have no intervening answer or tool context. The stage cannot finish until the command passes. It halts on the declared bound, on a repeated failure with no file change, or if the supposedly read-only completion command changes the repository, index, or HEAD.
+
+A stage may instead continue a compatible earlier model stage:
+
+```yaml
+- id: plan-fix
+  prompt: prompts/plan-fix.md
+  model: gpt-5.6-sol
+  resumeFrom: plan
+```
+
+`resumeFrom` sends only `plan-fix`'s own rendered prompt while continuing the latest successful `plan` invocation's CLI conversation. The original planner prompt, repository discoveries, tool results, and answer are already in that session and are not replayed. The source and target must use the same resolved CLI model, the source must be an earlier model stage, and both must occupy the same logical execution scope. Top-level stages may resume top-level stages. A foreach stage may resume only a stage from the same item; top-level-to-item, item-to-top-level, and cross-item session sharing are rejected.
+
+Within a bounded loop, matching is deterministic: the latest successful prior source invocation in the same scope wins. A source earlier in the loop body is available in the current round; a source later than the target is rejected because the target's first round would have nothing to resume. If a repeated source produced no successful invocation or no usable session id, the target fails with structured continuation telemetry — Chainkit never falls back to a fresh conversation.
+
+`resume: true` and `resumeFrom` are mutually exclusive. The former continues the same stage's own latest successful invocation; the latter selects another stage's lineage. Completion retries treat either inherited session identically and send compact failure feedback. A resumed stage may also declare `resumePrompt: prompts/continue.md`; on a later ordinary invocation that is already on the same target lineage, Chainkit renders this smaller authored prompt instead of replaying the target's initial prompt. `resumePrompt` requires either `resume: true` or `resumeFrom` and uses the same placeholder validation as `prompt`.
+
+Output-token telemetry uses the current CLI's `model.model_call_success.data.responseUsage.completion_tokens` as the authoritative source, with legacy `assistant.message.data.outputTokens` only as a fallback. Mixed streams are therefore counted once, while streams with no token telemetry remain explicitly unreported rather than appearing as zero.
 
 **A command READS artifacts from a file, not from `{{...}}`.** Interpolation is right for a scalar (`pnpm test {{chunk.id}}`) and wrong for a structured artifact: `render` serialises an object as pretty-printed multi-line JSON, which is exactly what a prompt wants and is unsafe inside `bash -c` — a value containing an apostrophe, a backtick or a `$` is not rejected, it is silently mangled or executed. So every run stage is handed the whole store as a file instead:
 
@@ -71,37 +88,41 @@ The file is written into the stage's own log directory on every path, including 
 
 It is also the honest way to declare a deterministic **write**. A model stage with `tools: false` halts the run if the tree moves, because the config claimed it only reasons; a `run` stage is exempt, since writing is its job and its command is stated in the config in full — "what may this change" is answered by reading it, not by trusting a flag.
 
-Control flow is explicit and bounded: stages run in order; `loop` repeats a subset until an artifact field is true; stage completion retries the responsible agent until a command passes; and a repairable final gate retries configured integration stages against the same deterministic command.
+Control flow is explicit and bounded: stages run in order; `loop` repeats a subset until an artifact field is true; and the same optional `completion` contract judges an agent stage, each `foreach` item, or the assembled chain. `attempts` always means total checks, including the initial check. Agent retries automatically resume the owning stage; composite retries require ordinary stages under `repair.stages`.
 
-**Declared position decides when a linear stage runs.** A stage that is neither a loop nor a fan-out member runs in the slot its position in `stages` puts it — before the blocks, between them, or after. This is what makes a post-fan-out step (normalise the tree, collect a report, commit the result) expressible, and it is why the gate never has to mutate anything itself.
+**Declared position decides when a linear stage runs.** A stage that is neither a loop nor a fan-out member runs in the slot its position in `stages` puts it — before the blocks, between them, or after. This makes a post-fan-out transformation explicit instead of hiding mutation inside a completion judge.
 
-**A loop that never reaches its condition halts the run.** `until` is the chain's own statement of when the loop's output is fit to use, so exhausting `max` without reaching it is a failed precondition, not a lap counter running out — and continuing spends everything downstream (typically a fan-out, at many times the loop's cost) on an artifact the chain's own reviewer rejected. Set `onExhausted: continue` for the case where continuing is right: a loop whose reviewer is **advisory** because something objective follows it, as in [03-bounded-loop](examples/03-bounded-loop/), where the gate rather than the reviewer decides. An unsatisfied loop is recorded as unsatisfied either way, and blocks `delivered` either way. The key is rejected on a `foreach`'s inner loop, where that element's gate already runs next and stopping early would discard it.
+**A loop that never reaches its condition halts the run.** `until` is the chain's own statement of when the loop's output is fit to use, so exhausting `max` without reaching it is a failed precondition, not a lap counter running out. Set `onExhausted: continue` when an objective completion command follows and should decide. `loop.until` remains artifact-driven control flow; it is not a completion check.
 
-Repository-specific refusals belong in `preflight`, where they run after Chainkit's own git/base checks and before any model spend:
+The worktree must always be a clean git repository with a base commit. This built-in preflight cannot be disabled. Repository-specific refusals belong in `requires`; it runs after those built-in checks but before logs or model spend, may interpolate only scalar literal seeds, cannot repair, and may not mutate the repository:
 
 ```yaml
-preflight:
-  run: test -z "$(git status --porcelain)"
+requires:
+  run: test "{{target}}" = supported
 ```
 
-The final gate remains a string for simple chains. A chain that can repair integration failures may name ordinary stages to run before retrying the exact same command:
+Composite completion uses the same shape at `foreach.completion` and top-level `completion`:
 
 ```yaml
-gate:
+completion:
   run: pnpm check
+  attempts: 2
   repair:
     stages: [integration-fix]
-    max: 2
 ```
 
-Chainkit appends the failed command and its bounded output to each repair stage automatically. The chain author does not declare a synthetic feedback artifact; artifacts remain domain data passed between stages. The command, never the model, decides whether the run is clean.
+Chainkit appends the failed command and bounded output to each repair stage automatically, then reruns the exact rendered command. Repair stages are isolated from normal scheduling and artifact production. A successful chain repair is committed before verification is recorded.
+
+Completion is optional. A successful chain with no top-level completion exits successfully as **completed / unverified** and can never be `delivered`. Delivery additionally requires a passing declared chain completion, a non-empty diff, and intact repository identity.
 
 ## Layout
 
     run.mjs              the driver
     models.mjs           probe the CLI for which model ids it actually accepts
-    check.mjs            the whole gate: format, lint, deadcode, every selftest
+    check.mjs            the whole project check: format, lint, deadcode, every selftest
     selftest.mjs         deterministic behaviour gate — run after any kernel change
+    vendor.mjs           canonical consumer install/update + integrity verification
+    vendor.selftest.mjs  consumer-fixture distribution gate
     kernel/
       config.mjs         load + STATIC validation (fails free, before any spend)
       context.mjs        artifact store + {{placeholder}} rendering
@@ -115,11 +136,13 @@ Chainkit appends the failed command and its bounded output to each repair stage 
     examples/NN-name/    one worked chain per directory: chain.yaml, its prompts, a README
     fixtures/<name>/     greenfield graders — the objective definition of done
     extensions/          the two canvases: a live run dashboard and a chain designer
-    results/chain-runs/  one JSON record per run + per-stage raw JSONL under logs/
+    results/chain-runs/  one JSON record per run + raw logs and live _calls/_events journals
 
 A chain is a `.yaml` file (YAML because it takes comments, and the reasons behind a roster are worth writing down). A prompt is a `.md` file in a `prompts/` directory beside it; `{{artifact}}` is interpolated.
 
-## The gate
+`_events.jsonl` is append-only additive observability. Completion contracts write generic `completion.checked` events with their bounded result. Every `run:` stage also writes `command.stage.started`, `.completed`, or `.failed` lifecycle events with stable sequence/stage/foreach/round/attempt identity, the bounded rendered command, timing and exit status, bounded stdout/stderr diagnostics, and generic artifact metadata plus a bounded preview when `produces` is declared. Stages without `produces` still retain their command output. Raw provider JSONL, `_calls.jsonl`, and the final run record keep their existing roles; the runs canvas merges the event journal while a run is live and uses the final record as durable enrichment when it appears.
+
+## The project check
 
     node check.mjs        (or `pnpm chainkit:check` from the host repo)
 
@@ -138,7 +161,7 @@ The selftests are the load-bearing part: the static checks check shape, the self
 
 A stage names its model as a bare string, and until it is dispatched nothing checks it. For a stage late in a fan-out that means a typo is discovered _after_ every earlier stage has been paid for. `kernel/models.mjs` carries a roster of ids the CLI is known to accept, and `--validate-only` warns (with a nearest-match suggestion) about anything not in it.
 
-It is a **spell-check, not a gate**, and that is deliberate: chainkit does not own the list. `copilot` does, the set moves as models ship and retire, and it varies by account and org. A hard allowlist would eventually reject a chain naming a model that is real and simply newer than this file — so an unknown id warns and the run proceeds. A stale roster costs a spurious warning; a roster trusted as a gate would block working chains.
+It is a **spell-check, not a completion contract**, and that is deliberate: chainkit does not own the list. `copilot` does, the set moves as models ship and retire, and it varies by account and org. A hard allowlist would eventually reject a chain naming a model that is real and simply newer than this file — so an unknown id warns and the run proceeds. A stale roster costs a spurious warning; a roster trusted as a gate would block working chains.
 
 The CLI has no enumerate command (`/model` is an interactive picker; there is no `--list`), so the roster is refreshed by asking the binary one id at a time:
 
@@ -165,22 +188,72 @@ Each directory is self-contained: the chain, every prompt it uses, and a README 
 
 ## What it deliberately does NOT have
 
-**Typed gates.** Domain-aware checks — telling an environment failure from a code failure, proving a test is red before it is built against, vetoing an acceptance command of the wrong shape — are worth having, and they are typed to a specific chain's artifacts. A chain that needs one gets one; none of them are hoisted into the kernel, because the moment the kernel understands what a stage means, "adding a stage is config" stops being true.
+**Typed completion kinds.** Domain-aware checks are worth having, but they remain commands configured against a chain's artifacts. None are hoisted into the kernel, because the moment the kernel understands what a stage means, "adding a stage is config" stops being true.
 
 **Branching.** Control flow is two things: stages run in order, and one bounded loop repeats a subset until a named field is true. There is no `if` and no stage that decides what runs next.
 
 ## Vendoring it into a repo
 
-chainkit is consumed by copying it into a host repo at `vendor/chainkit/`. The split that matters:
+Install from a clean, committed Chainkit checkout:
 
-- **`vendor/chainkit/`** is the engine and its **examples**. It is replaced wholesale on upgrade and never edited in the host. Verify that by recording a content hash of the copy and checking it in the host's own gate — an in-place edit here is not a small mistake, it is work that disappears later with no error and no diff.
-- **`.chainkit/`** in the host is what the host owns: the chains it actually runs, their prompts, and the run records they produce.
+```sh
+node /absolute/path/to/chainkit/vendor.mjs install /absolute/path/to/consumer
+node /absolute/path/to/consumer/vendor/chainkit/vendor.mjs check /absolute/path/to/consumer
+```
+
+`install` replaces only `vendor/chainkit/` and Chainkit's own root installations. It creates missing parent directories and installs:
+
+```text
+.github/extensions/chainkit-canvas/
+  extension.mjs
+  render.mjs
+  selftest.mjs
+  telemetry.mjs
+.github/skills/chainkit/
+  SKILL.md
+```
+
+Project extensions are discovered only at repository-root `.github/extensions/`; the source copy under `vendor/chainkit/extensions/` is not loaded by the consumer. Reinstalling updates the managed `chainkit-canvas/` and `chainkit/` directories exactly, including removing files retired upstream, but does not remove or edit sibling extensions, sibling skills, or consumer-owned `.chainkit/` policy.
+
+The split that matters:
+
+- **`vendor/chainkit/`** is the engine and its **examples**. It is replaced wholesale on upgrade and never edited in the host.
+- **`.github/extensions/chainkit-canvas/`** and **`.github/skills/chainkit/`** are deterministic root copies owned by the same Chainkit revision. Consumer-specific extensions and skills stay in sibling directories.
+- **`.chainkit/`** in the host is what the host owns: wrappers, policy, the chains it actually runs, their prompts, and the run records they produce.
 
 The test the split is designed against: **delete `vendor/chainkit/`, drop in a newer copy, lose nothing.** If something you would miss dies in that swap, it was in the wrong directory. Run records follow the same rule — the engine writes them beside the **chain** that produced them (`<chain dir>/../results`), so a host chain records into the host, not into a directory the next upgrade destroys.
 
-Note that the engine's own gate passes happily on a modified vendored copy: it checks whether the engine is **correct**, not whether it is **authentic**. Those are different questions and need two checks.
+`.chainkit/vendor.json` retains the established vendor inventory shape: upstream repository, full revision, MIT license, and every vendored file's SHA-256 plus executable bit. `.chainkit/vendor-install.json` applies the same provenance and integrity coverage to the root-installed dashboard and skill. Keeping these separate is deliberate compatibility: existing consumers that parse `vendor.json` strictly do not need a manifest migration. The canonical `check` command verifies both.
 
-The two canvases under `extensions/` are part of the engine's surface, so `check.mjs` runs their selftests. A host repo installs them wherever it keeps extensions; the gate looks them up in both places rather than requiring either.
+An engine gate can pass on a modified vendored copy: it checks whether the engine is **correct**, not whether it is **authentic**. Run the vendor integrity check as a separate consumer gate. A consumer updating from a manually selected `git archive` may run the copied installer in place after replacing `vendor/chainkit/`:
+
+```sh
+node vendor/chainkit/vendor.mjs install . --revision <full-upstream-commit>
+```
+
+Never overlay a new archive onto the old vendor directory, and never patch the root-installed copies. A portability defect belongs upstream in Chainkit, followed by another canonical install.
+
+### Runs dashboard
+
+The installed `chainkit-runs` canvas is read-only. It accepts `{root, run}`, reads only beneath `<root>/results`, and serves an ephemeral localhost page for the lifetime of the canvas instance. For a consumer worktree, pass its absolute `.chainkit` directory:
+
+```js
+open_canvas({
+  canvasId: "chainkit-runs",
+  instanceId: "chainkit-run",
+  input: { root: "/absolute/worktree/.chainkit", run: "latest" },
+});
+
+open_canvas({
+  canvasId: "chainkit-runs",
+  instanceId: "chainkit-run",
+  input: { root: "/absolute/worktree/.chainkit", run: "<full-run-id>" },
+});
+```
+
+`latest` follows the newest run and is appropriate when only one run is active. A full run id pins the panel. `tag:<tag>` follows the newest run carrying a tag and is the stable choice when runs may overlap. The run id appears under `.chainkit/results/chain-runs/logs/`.
+
+The two source canvases under `extensions/` remain part of the engine's tested surface, so `check.mjs` runs their selftests before distribution.
 
 ## Developing
 

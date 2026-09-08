@@ -1,6 +1,6 @@
 {
   "repository": "markgar/chainkit",
-  "revision": "c3fdaed1dd0ed182f3ec34bbe3b5b6062b08f670",
+  "revision": "2ec2c6fcdc609d7181d56556f2b7b638ff3ddd04",
   "license": "MIT",
   "files": {
     ".github/workflows/ci.yml": {
@@ -16,7 +16,7 @@
       "executable": false
     },
     ".prettierrc.json": {
-      "sha256": "376421500e2e99d66fd418b0e88212573aadba9e59c9f8bd0df78cde58252faa",
+      "sha256": "b15cd5463b31f5cedac9c3c236587403e7d954e72e8250b10bdc5ae791d7c78c",
       "executable": false
     },
     "LICENSE": {
@@ -24,15 +24,15 @@
       "executable": false
     },
     "README.md": {
-      "sha256": "9636fe95ed49901837aa53953d90c9c3df63973651a09acd8672771a04f43674",
+      "sha256": "8bdee254532839b90e46d709583dcbfc5715d113b66339f6799d81af83127cc9",
       "executable": false
     },
     "check.mjs": {
-      "sha256": "d5522e0086a64bbc8d136be1c1d958a929d0e73ca3bb4cd9e611cbb858462a3f",
+      "sha256": "e8599aee2ea3aa2352beece270fabdbf4fefa1590cf1ef0b277f64f8eb97ae1a",
       "executable": false
     },
     "completion.selftest.mjs": {
-      "sha256": "f648d93e3426d80ffd096aa288a3fff4ba646569e5590d854f2ad3c10236caf3",
+      "sha256": "8e3f1ddbb50d8c7f9e6e680e02173549082e0549242aee2884da0814bce12317",
       "executable": false
     },
     "eslint.config.js": {
@@ -40,11 +40,11 @@
       "executable": false
     },
     "examples/01-single-stage/README.md": {
-      "sha256": "6fcf0436024099b79ae57abd9c796fa3d67e8fc4d2daa2b4b3d3b3a782ec9c34",
+      "sha256": "581e4c3c6ba06a95c4529c2fe0a1f4c30da8dc4ed069991726529da59da50a95",
       "executable": false
     },
     "examples/01-single-stage/chain.yaml": {
-      "sha256": "1ffe4a14b81a253230487313b078ef9e859b0af212fdc859786fb6cac7684cd3",
+      "sha256": "2f1e6c1a086a1eb8a354440e1f9c682a07992ea9164bb83d50ca256585646708",
       "executable": false
     },
     "examples/01-single-stage/prompts/code.md": {
@@ -52,11 +52,11 @@
       "executable": false
     },
     "examples/02-review-and-fix/README.md": {
-      "sha256": "9e1b3a006c68b7729c1625e68a623b1c0246857c08b4d875e107239c8532b9e2",
+      "sha256": "fa03ebda0748344581d0be14afd044c823c90fefa3ec55de4074fbdb0074c678",
       "executable": false
     },
     "examples/02-review-and-fix/chain.yaml": {
-      "sha256": "60b4fd823f31e754d6824ea8b4cc6e8e41cccd8982206d215d612f0f108e0a64",
+      "sha256": "2c5ff4e6a90787edecb6787734282303836a7db85d5d38c30c989202f83973c9",
       "executable": false
     },
     "examples/02-review-and-fix/docs/conventions.md": {
@@ -80,11 +80,11 @@
       "executable": false
     },
     "examples/03-bounded-loop/README.md": {
-      "sha256": "1636cd2cf6e9cbd3c0ffdfaa386b4ca25173caf9a46cef61e5d01530af27b967",
+      "sha256": "3c824b79f1ffbb66290b0f889251ebb584d358e473e072711d44e0e249fabb5c",
       "executable": false
     },
     "examples/03-bounded-loop/chain.yaml": {
-      "sha256": "ae2f3c54b40c0f30358a4ac005ff39cb8b4b3deeff9dace6929bcee4a080904c",
+      "sha256": "721d9dea8d195bcdce512bb4349957f014062633e0abb8ca4c0994e34afced02",
       "executable": false
     },
     "examples/03-bounded-loop/docs/conventions.md": {
@@ -108,11 +108,11 @@
       "executable": false
     },
     "examples/04-plan-and-fan-out/README.md": {
-      "sha256": "1b877e00a90bfefe7ccc290e833899782abcfc505e46b4676a0601818e9feb6b",
+      "sha256": "24a4cdc5daafc4089e10055ae82ca0ada684187029da61097fdc2ce7721cdbee",
       "executable": false
     },
     "examples/04-plan-and-fan-out/chain.yaml": {
-      "sha256": "67a2df2919d15a46091250dd0f5b2ed47760f1fb2652c018e841ba768a2a9e82",
+      "sha256": "6247dc78eace029c68e72d5a9b389f8993529063dd8fec21acb8ab551b81c9d4",
       "executable": false
     },
     "examples/04-plan-and-fan-out/docs/conventions.md": {
@@ -136,7 +136,7 @@
       "executable": false
     },
     "examples/04-plan-and-fan-out/prompts/plan.md": {
-      "sha256": "cd191590e58ee6d9b2003a8af4e3344cd1603a8baaf8c3046364d6c99b85528e",
+      "sha256": "327c8463ca9873565a6c05afd5fe01387e50620ed5d27a1e945589f6b2a76f3a",
       "executable": false
     },
     "examples/04-plan-and-fan-out/prompts/review.md": {
@@ -144,39 +144,39 @@
       "executable": false
     },
     "examples/README.md": {
-      "sha256": "d28294617742cf978afb3600187db62156d17801d0464413bcf957add1074fe8",
+      "sha256": "defd4db0eb99fb394819c05f1f52b1df10c68c95097dfd84b00f7c5fb0503c6a",
       "executable": false
     },
     "extensions/chainkit-canvas/extension.mjs": {
-      "sha256": "6870aa488ff3280f6f16e5a50654b3e8ff5bdacdc8ae68467aabaa9d4f88d8b3",
+      "sha256": "804365cd8e2c467a0014f88a5cc67febede2b62efe4585ceba3791cf412c7e70",
       "executable": false
     },
     "extensions/chainkit-canvas/render.mjs": {
-      "sha256": "6778351982ff2043d0bf69900480cca67b500df1de0b7fc4a0cfdff6aaf896b7",
+      "sha256": "238abb964727456abffb2e774ba4424ec05ce7c20a7ae22167979f1bffe44122",
       "executable": false
     },
     "extensions/chainkit-canvas/selftest.mjs": {
-      "sha256": "5ddd7b99e65eeda8b73fd3745316e2f20891321231b04f90d8be021b55385fcf",
+      "sha256": "d3ff49ca4fd8f15e2cfe5c9f87c9994ca2dbdfc26d2f5b5faea371314834decc",
       "executable": false
     },
     "extensions/chainkit-canvas/telemetry.mjs": {
-      "sha256": "8dd48404cf37fdb7b0a710e9c9ef2178e60b0e4f3ab5fb556426fd0d8e9b2c47",
+      "sha256": "7a53d265cf01182d286c97e41ca2f9e224dbde5b5895d75f2e74cb7c786d3d79",
       "executable": false
     },
     "extensions/chainkit-designer/design.mjs": {
-      "sha256": "a2406bd232d0d7c333522a9779c1066df7640d2c0e7d638e0d890da83fcda6f3",
+      "sha256": "47b9640a4b67b96f78fd147d2782850fc3c5519c17f39e58483bae3f6cf88620",
       "executable": false
     },
     "extensions/chainkit-designer/extension.mjs": {
-      "sha256": "8f4331b05529cc655e71908c9f4a59355a732379dda49dbe16f187cb7bb9ce0c",
+      "sha256": "3efa346507bcea56f124b288c10f7b7c84250b4386a939b9909f61a7e3ae4fb1",
       "executable": false
     },
     "extensions/chainkit-designer/render.mjs": {
-      "sha256": "558899a1e40ed97abd6f1d26286eee0b2b644e39758832c9cd1094f074ea0c13",
+      "sha256": "1ae72e725ab26f8ae9225ac872a2614d75ae943df5a402e9ab712fb577e00b24",
       "executable": false
     },
     "extensions/chainkit-designer/selftest.mjs": {
-      "sha256": "337c91f9c990ae91a2cf18eb39f88dfada5437bcb7d163f4c90a99cc3d392e4f",
+      "sha256": "ea48b9f1b0b8bb77fb3cedf6727700efdd01093a3b42038066416695e826b495",
       "executable": false
     },
     "fixtures/README.md": {
@@ -247,12 +247,16 @@
       "sha256": "a36b9aea84da2f8886c2975d4d0dcb10d49d2b7223eb6164e8bb66e9cc254191",
       "executable": false
     },
+    "kernel/completion.mjs": {
+      "sha256": "b91ab3109d49783524eb8fe4bf2493af17841fcc7337bb081a166f5d16cc2741",
+      "executable": false
+    },
     "kernel/config.mjs": {
-      "sha256": "1901c92f04eff1c2f3e348ba16fd1bc25a23ee9df9fb7677983af90e8a80b61b",
+      "sha256": "0a9db49f1a21b80b835706ada2233deca904cd0a9200bc7ca7d8a1d87394d1c6",
       "executable": false
     },
     "kernel/context.mjs": {
-      "sha256": "8d6d4117d395ca01bad8782b84d56727a72b130607196da356b99b110db10420",
+      "sha256": "74ae097e95f44be81c5faeda7fc38f30881a30cf9e1afab98e3673d85a54ed3d",
       "executable": false
     },
     "kernel/cost.mjs": {
@@ -260,23 +264,31 @@
       "executable": false
     },
     "kernel/foreach.mjs": {
-      "sha256": "b02e65e7cd64ad08c157347fad9710d231c5721f0c4fceb66e4be0dfe48ca518",
+      "sha256": "45ed7b49d30e2d0a5afe0f0af11ed4d52d1da56fa10996cfdb74bdd8e220decf",
       "executable": false
     },
     "kernel/models.mjs": {
-      "sha256": "1b64a871fede80d4b92429511ea755d3549153cf8c2ee01867665a53c1325792",
+      "sha256": "ffb255ca015f5de0310e83a15f796b3389b4f663180f6bf91021454931f05fcc",
       "executable": false
     },
     "kernel/providers.mjs": {
-      "sha256": "3d4d555e33b7c0887c6f909f020edc4b873727565943996d01263c3ccab53dce",
+      "sha256": "994c6268de68def5684c7ba3260fa83c4802c00ea5d953459b8c23561cefc56a",
+      "executable": false
+    },
+    "kernel/record.mjs": {
+      "sha256": "b00ae87c9259457a0e2907c42fa96e8a0965682a7d5e8b5b08e75a1e9b382c40",
+      "executable": false
+    },
+    "kernel/session.mjs": {
+      "sha256": "c17be7abcc41193f96f640f966b3a98e9ed9a67a313c194be6dff46356661a32",
       "executable": false
     },
     "kernel/stage.mjs": {
-      "sha256": "03fc8153c5df215cfb808829283a92c9fe0f9d3733c54e937408bbb1b76e75b9",
+      "sha256": "a74d803f4be86a0e28adeda251e2070a84b57532aa353b3ca944d0308794b38b",
       "executable": false
     },
     "kernel/telemetry.mjs": {
-      "sha256": "2a498ed8a7b59a9254fd888cda3fb77e14d35f8c773963fcec751c9ddbccc6c7",
+      "sha256": "e1b20384cf394734b5a0afd08c36646ab0efc1512836062989cea52c529f9d2d",
       "executable": false
     },
     "kernel/tree.mjs": {
@@ -284,7 +296,7 @@
       "executable": false
     },
     "knip.json": {
-      "sha256": "9b6b675ffc130ab5f608f9064703868f1bf09c579123ad3297eeae29063c26bb",
+      "sha256": "8d9575d7ebd5f9fa6d8c0c39710f0f418d52f63fa51f5aa9aedc67d97f96b820",
       "executable": false
     },
     "models.mjs": {
@@ -292,19 +304,35 @@
       "executable": false
     },
     "package.json": {
-      "sha256": "2ae96241394980ccef6838c25af2b386aa4b7629d2e3365e392752479c9db3ff",
+      "sha256": "73c7b869676682d6672c073cc33cb41b9d0448f7a03841bb2612d590a34fa09c",
       "executable": false
     },
     "prep-workdir.mjs": {
       "sha256": "ef23a4e0c202e2d0fec17f69e07510c37b1b1818d2f90711744f2b9420f0d213",
       "executable": false
     },
+    "resume.selftest.mjs": {
+      "sha256": "38a6f026ca40270b5e2589eafc97960f1ef88f0dbf8085a43e2167fce596c79c",
+      "executable": false
+    },
     "run.mjs": {
-      "sha256": "e0a66a5182e1584ffb7ac7ef89e950ffe6dcfabe487b21bc15da233ff4a27335",
+      "sha256": "d7be549c047f79eb855f5cf6c9c4a16b9327fc401b8c50245c74765fc83768bf",
       "executable": false
     },
     "selftest.mjs": {
-      "sha256": "26c1e525f435bf7599402de4da021dde3520af19068f7990214125e79c67b448",
+      "sha256": "436b71f1ed98eba083fa780bccf69a99ffafdfb792c48f745db806650c77754c",
+      "executable": false
+    },
+    "skills/chainkit/SKILL.md": {
+      "sha256": "b19fc9dfb7f2097e9f280d1732073a2e503ae82c80428646d0f8d0663cf7d527",
+      "executable": false
+    },
+    "vendor.mjs": {
+      "sha256": "9e35737ff89db7aa745d1ecfaa65ba2e0fac833ca04ae123358730678754f8e0",
+      "executable": false
+    },
+    "vendor.selftest.mjs": {
+      "sha256": "6d77a63e247e3e6e0af5abaab22119ff77fc3141fe68d120e83939bcfc97573a",
       "executable": false
     }
   }

@@ -1,0 +1,39 @@
+{
+  "repository": "markgar/chainkit",
+  "revision": "2ec2c6fcdc609d7181d56556f2b7b638ff3ddd04",
+  "license": "MIT",
+  "installations": [
+    {
+      "source": "extensions/chainkit-canvas",
+      "target": ".github/extensions/chainkit-canvas",
+      "files": {
+        "extension.mjs": {
+          "sha256": "804365cd8e2c467a0014f88a5cc67febede2b62efe4585ceba3791cf412c7e70",
+          "executable": false
+        },
+        "render.mjs": {
+          "sha256": "238abb964727456abffb2e774ba4424ec05ce7c20a7ae22167979f1bffe44122",
+          "executable": false
+        },
+        "selftest.mjs": {
+          "sha256": "d3ff49ca4fd8f15e2cfe5c9f87c9994ca2dbdfc26d2f5b5faea371314834decc",
+          "executable": false
+        },
+        "telemetry.mjs": {
+          "sha256": "7a53d265cf01182d286c97e41ca2f9e224dbde5b5895d75f2e74cb7c786d3d79",
+          "executable": false
+        }
+      }
+    },
+    {
+      "source": "skills/chainkit",
+      "target": ".github/skills/chainkit",
+      "files": {
+        "SKILL.md": {
+          "sha256": "b19fc9dfb7f2097e9f280d1732073a2e503ae82c80428646d0f8d0663cf7d527",
+          "executable": false
+        }
+      }
+    }
+  ]
+}

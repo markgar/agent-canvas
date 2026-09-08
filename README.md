@@ -4,47 +4,86 @@ A local, general-purpose visual surface controlled by an AI assistant through MC
 The assistant decides what to show; the user continues the conversation in chat.
 Email is the first use case, not the application model.
 
-**Status: repository scaffold.** The TypeScript development environment and a
-loopback HTTP server are runnable. MCP, browser rendering, SSE, authentication,
-and draft editing are not implemented yet. Do not supply real email or other
-sensitive content to this scaffold.
+**Status: standalone live display implemented.** One Node.js process exposes
+three stdio MCP tools and a manually opened loopback browser surface. The browser
+uses an authenticated SSE stream, retains the latest sanitized view in memory,
+and replaces an isolated sandboxed frame without reloading the trusted shell.
+Editing, persistence, remote hosting, multi-user sharing, email access/actions,
+and host-specific browser integration are not implemented.
 
-## Start locally
+## Run with an MCP host
 
 Use Node.js 22.14+ (22.x) and npm 10+. `.nvmrc` pins the supported development
 runtime and routine CI uses the same major version. Node.js 24 compatibility is
-deferred until a later explicit support pass.
+deferred and is not claimed by this milestone.
 
 ```sh
 nvm use
 npm ci
+npm run build
+```
+
+Configure the MCP host to execute the compiled entry point directly:
+
+```text
+node /absolute/path/to/agent-canvas/dist/server/main.js
+```
+
+Do not use `npm start` as the MCP command because npm output can contaminate the
+stdio protocol. The host discovers `canvas_get_status`, `canvas_present`, and
+`canvas_clear`. `canvas_get_status` returns a credential-bearing browser URL.
+Open that URL manually in a browser; hosts may open it only when they have an
+explicit browser-opening capability. Separate assistant sessions should launch
+separate processes.
+
+The process binds only to `127.0.0.1` on an ephemeral port by default. Use
+`AGENT_CANVAS_PORT=3000` in the host configuration when a fixed port is needed.
+Use `127.0.0.1`, not `localhost`; Host and applicable Origin checks require the
+exact listener authority. Startup diagnostics use stderr, MCP alone uses stdout,
+and no `.env` file is loaded automatically.
+
+For development outside an MCP host:
+
+```sh
 npm run dev
 ```
 
-The process prints its local address to **stderr**. Open `<printed-address>/health`
-to see the JSON liveness response. The root URL has no browser UI yet.
-Port zero is the default, allowing independent assistant sessions to coexist.
+The root shell is content-free until the fragment bootstrap secret is exchanged
+for an HttpOnly same-origin session. Treat the status URL as a credential: do not
+share it, put it in logs, or reuse it after a restart.
 
-For a fixed port:
+## Delivered boundary
 
-```sh
-AGENT_CANVAS_PORT=3000 npm run dev
-```
+- One process owns one current sanitized view. Present and clear mutations are
+  serialized; accepted mutations advance the revision. Restarting loses content
+  and invalidates browser credentials.
+- The browser receives full snapshots over authenticated SSE, visibly marks
+  retained content stale during loss, retries one connection at a time, and
+  recovers the latest snapshot. Slow streams retain at most one pending latest
+  snapshot and are evicted after five seconds of backpressure.
+- Supplied HTML/CSS is allowlisted and rendered in a scriptless sandboxed frame
+  with restrictive CSP and no remote resources, forms, navigation, arbitrary SVG,
+  or access to the trusted shell.
+- Server-retained content and session records are process-memory-only. Sensitive
+  responses are `no-store`; the application uses no telemetry, third-party assets,
+  local storage, service workers, database, or content files.
+- Canvas has no email credentials and never retrieves, sends, or deletes mail.
+  Browser activity does not authorize external actions or wake an assistant.
 
-Use `127.0.0.1`, not `localhost`: the listener and Host/Origin policy use the exact
-loopback address. There is no network-interface override. No `.env` file is
-automatically loaded.
+Loopback and browser authentication do not protect against malware, a privileged
+local user, screenshots, browser memory, or mishandling by the MCP host. Do not
+display classified, rights-managed, or otherwise restricted material unless its
+handling rules explicitly permit this surface. Automated fixtures are synthetic
+only. The server cannot prevent an MCP host or ordinary browser profile from
+retaining tool results, credential URLs, cookies, history, cached process data,
+or displayed content outside the application.
 
-To run the compiled application:
-
-```sh
-npm run build
-npm start
-```
-
-Once stdio MCP is implemented, MCP hosts should execute
-`node /absolute/path/to/dist/server/main.js` directly, not `npm start`; npm's own
-script output can contaminate the MCP transport.
+The milestone support target is macOS, GitHub Copilot CLI as the MCP host, and
+Chromium-based Chrome/Edge. Automated acceptance uses the pinned Playwright
+Chromium build on Node.js 22.14+ (22.x). Firefox, WebKit/Safari, Windows/Linux,
+other MCP hosts, and Node.js 24 are unverified. Human smoke testing in actual
+Chrome, Edge, and GitHub Copilot CLI, plus an explicitly consented real-email
+demonstration, remain outstanding and are not implied by automated results.
 
 ## Repository map
 
@@ -53,11 +92,17 @@ src/
   contracts/          Portable runtime schemas and inferred wire types
   server/
     config.ts         Validated environment configuration
-    main.ts           Process startup, diagnostics, and shutdown
-    http/             HTTP adapter and request boundary
-  client/             Reserved browser boundary; implementation deferred
+    main.ts           Stdio/HTTP startup, diagnostics, and shutdown
+    display/          Serialized in-memory current-view operations
+    security/         Browser sessions and HTML/CSS sanitization
+    mcp/              Official SDK stdio tool adapter
+    http/             Shell assets, session routes, and authenticated SSE
+  client/
+    shell/            Trusted shell, validated SSE, and liveness state
+    rendering/        Sandboxed frame creation and replacement
 tests/
-  integration/        Real HTTP and process-lifecycle tests
+  browser/            Compiled-process Chromium behavior and security evidence
+  integration/        Real MCP, HTTP, and process-lifecycle tests
 docs/
   architecture.md     Dependency rules and growth path
   build-system.md     Build architecture and evidence behind its design
@@ -98,10 +143,9 @@ Use the [build-spec skill](.github/skills/build-spec/SKILL.md) for a reviewable
 contract and [build-feature](.github/skills/build-feature/SKILL.md) for readiness
 and an explicitly authorized launch. Feature tests can be written with each
 implementation chunk; a complete prewritten test harness is not a prerequisite.
-The shared browser build tools are present without a browser UI. Install the pinned
-Chromium binary with `npm run browser:install` before browser acceptance.
-CI uses one macOS/Node.js 22 job and installs Chromium only when browser source
-exists. It runs `npm run check`; vendored Chainkit self-tests remain available
+Install the pinned Chromium binary with `npm run browser:install` before browser
+acceptance. CI uses macOS/Node.js 22, runs `npm run check`, and installs Chromium
+for the compiled browser cases. Vendored Chainkit self-tests remain available
 through `npm run chainkit:selftest` rather than running on every change.
 
 `npm run chainkit:validate` checks the vendor pin, spec structure, and chain wiring

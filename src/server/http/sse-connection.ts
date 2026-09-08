@@ -46,7 +46,7 @@ export function createSseConnection(
   const drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
   let backpressured = false;
   let closed = false;
-  let pendingSnapshot: string | undefined;
+  let pendingSnapshot: DisplaySnapshot | undefined;
   let drainTimer: TimerHandle | undefined;
   let heartbeatTimer: TimerHandle | undefined;
 
@@ -111,7 +111,7 @@ export function createSseConnection(
     const nextSnapshot = pendingSnapshot;
     pendingSnapshot = undefined;
     if (nextSnapshot !== undefined) {
-      write(nextSnapshot);
+      write(formatSnapshotEvent(nextSnapshot));
     }
   }
 
@@ -139,12 +139,11 @@ export function createSseConnection(
       if (closed) {
         return;
       }
-      const event = formatSnapshotEvent(snapshot);
       if (backpressured) {
-        pendingSnapshot = event;
+        pendingSnapshot = snapshot;
         return;
       }
-      write(event);
+      write(formatSnapshotEvent(snapshot));
     },
     close() {
       finish(true);

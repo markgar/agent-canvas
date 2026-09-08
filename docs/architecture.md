@@ -1,33 +1,44 @@
 # Architecture
 
-## Implemented foundation
+## Implemented application
 
 Agent Canvas is one Node.js process and one npm package, compiled from TypeScript
-to native ESM. Fastify owns HTTP routing and lifecycle. Zod defines runtime
-contracts. Vitest, ESLint, Prettier, and TypeScript provide the automated quality
-gate.
+to native ESM with a bundled framework-free browser client. The official MCP SDK
+owns stdio protocol framing. Fastify owns loopback HTTP routing and lifecycle.
+Zod defines portable runtime contracts. Vitest, Playwright, ESLint, Prettier, and
+TypeScript provide the automated quality gate.
 
-The current vertical slice is deliberately small:
+The delivered data flow is:
 
 ```text
-main.ts -> configuration -> HTTP adapter -> health contract
+MCP host
+  -> stdio tools
+  -> validated/sanitized display operations
+  -> serialized in-memory snapshot
+  -> authenticated SSE subscribers
+  -> trusted browser shell
+  -> sandboxed content frame
 ```
 
-`createServer` constructs an unbound instance. Only the process entry point opens
-a listener and installs signal handlers, so tests can construct and close isolated
-servers without process-global side effects.
+`createRuntime` composes one display service, browser-session manager, Fastify
+server, and MCP server. Both transports call the same transport-independent
+display operations. `createServer` remains unbound; only the process entry point
+opens the listener and installs shutdown handling.
 
-The process starts on an ephemeral loopback port by default. Invalid configuration
-and occupied requested ports fail explicitly. Diagnostics use stderr. No content,
-credentials, database, or browser session state exists yet.
+The process binds exact IPv4 loopback on an ephemeral port by default. MCP protocol
+output is the only stdout output; content-free diagnostics use stderr. SIGINT,
+SIGTERM, and MCP stdin EOF close MCP, HTTP, and SSE resources. State, bootstrap
+secrets, browser-session records, and sanitized content retained by the server
+exist only in process memory. MCP hosts and browser profiles remain outside that
+storage boundary and may retain URLs, cookies, or displayed data.
 
 ## Dependency direction
 
-| Area                  | May depend on                                               | Must not depend on                                  |
-| --------------------- | ----------------------------------------------------------- | --------------------------------------------------- |
-| `src/contracts`       | Portable schemas and explicitly approved portable libraries | Server, browser implementation, Node.js/DOM globals |
-| `src/server`          | Contracts, Node.js, server libraries                        | Browser implementation                              |
-| `src/client` (future) | Contracts, browser APIs and portable libraries              | Server modules and Node.js                          |
+| Area            | May depend on                                               | Must not depend on                                  |
+| --------------- | ----------------------------------------------------------- | --------------------------------------------------- |
+| `src/contracts` | Portable schemas and explicitly approved portable libraries | Server, browser implementation, Node.js/DOM globals |
+| `src/server`    | Contracts, Node.js, server libraries                        | Browser implementation                              |
+| `src/client`    | Contracts, browser APIs and portable libraries              | Server modules and Node.js                          |
 
 ESLint enforces import boundaries; a separate TypeScript check compiles contracts
 without ambient Node.js or DOM types. Tests may cross boundaries to exercise
@@ -36,10 +47,7 @@ integration behavior. Production builds exclude tests.
 Use direct module imports instead of broad barrel files or runtime path aliases.
 Organize by feature within each runtime boundary as features appear.
 
-## Growth path
-
-Add the following when the live-display feature is implemented, not as empty
-frameworks in advance:
+## Runtime modules
 
 ```text
 src/server/
@@ -54,17 +62,48 @@ src/contracts/
   display.ts      Shared runtime schemas, revision and event contracts
 ```
 
-Both MCP and HTTP should call the same application operations. Do not put the
-state store inside a route handler or make MCP call the server's own HTTP API.
-Pass dependencies explicitly; avoid a service locator or dependency-injection
-framework.
+The display service validates and sanitizes before entering its serialized
+mutation section. It atomically retains one full current snapshot, advances the
+revision once, and publishes after mutation. Rejected input cannot change state.
+There is no history, persistence, or HTTP MCP endpoint.
 
 `tsconfig.server.json` and `tsconfig.client.json` check production Node and DOM
 boundaries independently of the mixed test program; contracts remain portable.
-The shared build compiles the server and bundles `src/client/shell/main.ts` with
-esbuild when that entry exists. No browser application is manufactured while it
-is absent. Playwright tooling is installed separately with `npm run browser:install`.
-There is no prewritten live-feature acceptance suite in the chain-only baseline.
+The build compiles server/contracts and bundles `src/client/shell/main.ts` with
+esbuild. Tests may cross boundaries only to exercise real integration behavior.
+
+## Browser access and rendering
+
+The root route serves a public content-free shell. A high-entropy fragment secret
+is exchanged once for an HttpOnly SameSite-strict cookie before content or SSE is
+available. Host and applicable Origin are exact, CORS is not enabled, and sensitive
+responses are `no-store`. Restarting creates a new instance and invalidates all
+prior server-side access records; it cannot erase host or browser artifacts.
+
+The browser uses a same-origin credentialed fetch stream rather than native
+`EventSource`, allowing status inspection and named heartbeat validation. Each
+connection begins with a complete snapshot. UTF-8 and SSE frames are incrementally
+decoded under an 8 MiB partial-data cap; malformed events abort without reaching
+the renderer. The browser compares instance/revision pairs, preserves the shell,
+and replaces only the sandboxed frame for a newer view.
+
+Valid snapshots and five-second heartbeat events provide liveness evidence.
+Failure immediately marks retained content stale. Status changes from reconnecting
+to disconnected after 15 seconds without evidence while one-at-a-time retries
+continue. Each attempt has its own 15-second timeout, including when an aborted
+fetch does not settle. Returning a stale tab to the foreground forces immediate
+reconnection.
+
+Each server connection has one active write and at most one pending latest
+snapshot. Heartbeats are skipped during backpressure, and a writer still blocked
+after five seconds is destroyed. The process accepts at most 32 authenticated SSE
+streams and releases counts on every closure path.
+
+Supplied HTML and CSS never enter the shell DOM. Sanitization uses explicit
+text/table/flex-oriented allowlists, normalizes allowed styles into nonce-authorized
+rules, and removes scripts, forms, navigation, remote resources, arbitrary SVG,
+and other active content. The result is rendered in a sandbox without
+`allow-scripts` or `allow-same-origin` and with a restrictive frame CSP.
 
 ## When to split
 
@@ -75,20 +114,20 @@ line count alone is not a reason to create a monorepo.
 The knowledge service is a separate product boundary, not a database to add here.
 Keep email authorization and execution in the assistant's existing integrations.
 
-## Deliberate deferrals
+## Deliberate boundaries and deferrals
 
-- MCP SDK: install when implementing the stdio adapter.
-- Browser application and feature tests: implement together in bounded chunks;
-  minimal bundling and browser tooling are already available.
-- Sanitizer and CSP: select and test together before accepting HTML.
-- Persistence: in-memory current state first, with explicit restart semantics.
-- Logging framework: add when useful, with redaction and stdout isolation.
-- Deployment containers and release publishing: no remote deployment or public
-  package is required for this local prototype.
-
-The HTTP timeouts and body limit are scaffold defaults, not display-stream or
-payload policies. Revisit them with SSE and enforce the product's payload limit at
-the MCP input boundary.
+- Node.js 22.14+ (22.x) is the runtime target. Node.js 24 compatibility is deferred.
+- macOS with GitHub Copilot CLI and Chromium-based Chrome/Edge is the end-to-end
+  target. Other operating systems, browsers, and MCP hosts are unverified.
+- Browser opening is manual or a separate host capability; it is not an HTTP or
+  MCP side effect.
+- Editing, view history, persistence, remote hosting, multi-user state,
+  infrastructure, knowledge services, embedded chat, and assistant wake-up are
+  separate features.
+- Canvas stores no email credentials and performs no source-system action. Real
+  email requires explicit operator permission after synthetic safety evidence.
+- Clearing and restart remove current process state but are not secure-erasure
+  guarantees for browser memory, screenshots, or other local observers.
 
 ## Build-system boundary
 

@@ -35,7 +35,6 @@ interface ActiveAttempt {
   generation: number;
   controller: AbortController;
   timeout: TimerHandle | null;
-  timedOut: boolean;
   hasSnapshot: boolean;
 }
 
@@ -137,7 +136,6 @@ export class DisplayConnection {
       generation: ++this.#generation,
       controller: new AbortController(),
       timeout: null,
-      timedOut: false,
       hasSnapshot: false,
     };
     this.#activeAttempt = attempt;
@@ -159,10 +157,11 @@ export class DisplayConnection {
         headers: { Accept: 'text/event-stream' },
         signal: attempt.controller.signal,
       });
+      responseBody = response.body;
       if (!this.#isCurrent(attempt)) {
+        void responseBody?.cancel().catch(() => undefined);
         return;
       }
-      responseBody = response.body;
 
       if (response.status === 401 || response.status === 403) {
         void responseBody?.cancel().catch(() => undefined);
@@ -225,7 +224,7 @@ export class DisplayConnection {
       if (!this.#isCurrent(attempt)) {
         return;
       }
-      if (attempt.controller.signal.aborted && !attempt.timedOut) {
+      if (attempt.controller.signal.aborted) {
         return;
       }
       if (cancelReader !== null) {
@@ -268,10 +267,12 @@ export class DisplayConnection {
       if (!this.#isCurrent(attempt)) {
         return;
       }
-      attempt.timedOut = true;
+      attempt.timeout = null;
       this.#markStale();
       this.#setStatus('disconnected');
+      this.#activeAttempt = null;
       attempt.controller.abort();
+      this.#scheduleRetry();
     }, CONNECTION_TIMEOUT_MS);
   }
 

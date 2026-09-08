@@ -1,5 +1,7 @@
 import './main.css';
 
+import { FrameRenderer } from '../rendering/frame.js';
+
 const BOOTSTRAP_TIMEOUT_MS = 15_000;
 
 function requireElement(selector: string): HTMLElement {
@@ -11,11 +13,26 @@ function requireElement(selector: string): HTMLElement {
 }
 
 const statusElement = requireElement('#connection-status');
+const contentElement = requireElement('.empty-state');
+const titleElement = requireElement('#empty-title');
 const detailElement = requireElement('#empty-detail');
+const nonceElement = document.querySelector<HTMLLinkElement>('link[nonce]');
+const styleNonce = nonceElement?.nonce ?? '';
+const renderer = new FrameRenderer(
+  document,
+  {
+    container: contentElement,
+    title: titleElement,
+    detail: detailElement,
+  },
+  styleNonce,
+);
 
-function setState(status: string, detail: string): void {
+function setState(status: string, detail?: string): void {
   statusElement.textContent = status;
-  detailElement.textContent = detail;
+  if (detail !== undefined) {
+    detailElement.textContent = detail;
+  }
 }
 
 function takeFragmentToken(): { supplied: boolean; token: string } {
@@ -52,6 +69,7 @@ function startBootstrap(token: string): Promise<Response> {
 async function handleBootstrap(request: Promise<Response>): Promise<void> {
   const response = await request;
   if (response.status === 204) {
+    renderer.render(null);
     setState('Session ready', 'Waiting for the assistant to present a view.');
     return;
   }
@@ -69,14 +87,17 @@ async function handleBootstrap(request: Promise<Response>): Promise<void> {
 }
 
 function initialize(): void {
-  const { supplied, token } = takeFragmentToken();
+  const fragment = takeFragmentToken();
+  const { supplied } = fragment;
   if (!supplied) {
     setState('Connecting', 'Checking the existing local browser session.');
     return;
   }
 
   setState('Authorizing', 'Establishing a local browser session.');
-  void handleBootstrap(startBootstrap(token)).catch(() => {
+  const request = startBootstrap(fragment.token);
+  fragment.token = '';
+  void handleBootstrap(request).catch(() => {
     setState(
       'Unavailable',
       'The local Agent Canvas session could not be established.',

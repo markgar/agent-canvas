@@ -40,9 +40,11 @@ description: Create or revise one grounded Agent Canvas feature draft for explic
    for drafts. Future paths/scripts are allowed but explicitly label those
    checks **proposed and not runnable yet**.
 8. Explain what each check proves; map requirement IDs to check IDs and list
-   human-only acceptance separately. Check definitions and underlying oracles
-   require human review before execution approval. Planners select IDs; they
-   cannot invent or alter checks, tests, or configuration to make a pass.
+   human-only acceptance separately. Commands and existing acceptance oracles
+   require human review before execution approval. An existing runner may discover
+   new feature tests written with implementation in later reviewed chunks; explain
+   that distinction rather than requiring every new assertion before planning.
+   Planners select IDs and must not weaken accepted tests or configuration.
 9. Stop at a reviewable draft. Explicit user approval alone authorizes approval
    metadata/status changes; the agent never self-approves. An approved feature
    still needs a valid plan grounded in `base_commit` and HEAD, with no stale
@@ -50,7 +52,8 @@ description: Create or revise one grounded Agent Canvas feature draft for explic
 
 Plans belong to the planning stage, not this skill. Their bounded sequential
 chunks have `id`, `title`, `files`, `specRefs`, `requirementIds`, `checkIds`,
-and `blueprint`; each exact file is owned once and `specRefs` uses literal heading
+and `blueprint`; exact files may have explicitly planned sequential revisits;
+`specRefs` uses literal heading
 names. Approval must not be inferred from a request to draft, tool adoption,
 check success, or a review recommendation.
 Feature chains cannot edit protected build policy, vendor, spec, or quality-gate

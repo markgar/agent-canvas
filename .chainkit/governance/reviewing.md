@@ -26,6 +26,11 @@ Completed specs are historical context only, not injected requirements.
   passes. Reviewed checks cannot be edited to make implementation pass.
   Block feature-chain edits to protected build policy, vendor, spec, or quality-gate
   files; workflow changes belong to separate human-reviewed work.
+  Review newly authored tests together with the capability: require meaningful
+  assertions for its assigned requirements, not just a green existing scaffold.
+  Explicitly review planned sequential revisits for regression loss. Test support
+  must not impose unnecessary product structure or contain a parallel fake
+  implementation. A chunk must remain small enough to inspect its code and tests.
 - **REV-005 — Honest acceptance.** Distinguish automated evidence from human-only
   acceptance and proposed/unavailable checks. Never substitute a simulated test
   for real browser isolation evidence or automate real-email consent.

@@ -93,11 +93,20 @@ own invariant documents, feature specs, prompts, and acceptance checks. Start wi
 [the standalone design and research rationale](docs/build-system.md), then use
 [the operating guide](.chainkit/README.md).
 
+Use the [build-spec skill](.github/skills/build-spec/SKILL.md) for a reviewable
+contract and [build-feature](.github/skills/build-feature/SKILL.md) for readiness
+and an explicitly authorized launch. Feature tests can be written with each
+implementation chunk; a complete prewritten test harness is not a prerequisite.
+The shared browser build tools are present without a browser UI. Install the pinned
+Chromium binary with `npm run browser:install` before browser acceptance.
+CI uses macOS for both supported Node versions so future browser assertions run
+on the feature's supported platform rather than being skipped on Linux.
+
 `npm run chainkit:validate` checks the vendor pin, spec structure, and chain wiring
 without calling a model. `npm run chainkit:selftest` runs upstream offline tests.
 
-The first [live-display feature spec](specs/001-live-display.md) is a **draft**, not
-permission to build. Execution requires an approved, current spec, a clean committed
+The first [live-display feature spec](specs/001-live-display.md) records its review
+status in frontmatter. Execution requires an approved, current spec, a clean committed
 worktree, and an explicit `--execute` flag. Runs spend model credits and create local
 checkpoint commits; they do not push or merge.
 

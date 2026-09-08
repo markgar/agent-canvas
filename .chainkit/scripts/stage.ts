@@ -152,16 +152,32 @@ export function executeStage(operation: string): unknown {
   );
 
   const measure = () => {
-    const checks = spec.metadata.checks
-      .filter((check) => chunk.checkIds.includes(check.id))
-      .map((check) => ({
-        id: check.id,
-        ...runReadOnlyCheck(cwd, check.command),
-      }));
-    checks.push({
-      id: 'format',
-      ...runReadOnlyCheck(cwd, ['npm', 'run', 'format:check']),
-    });
+    const checks = [
+      {
+        id: '_build',
+        ...runReadOnlyCheck(cwd, ['npm', 'run', 'build']),
+      },
+    ];
+    if (checks[0]?.pass) {
+      const requested = [
+        { id: '_typecheck', command: ['npm', 'run', 'typecheck'] },
+        { id: '_regressions', command: ['npm', 'test'] },
+        ...spec.metadata.checks.filter((check) =>
+          chunk.checkIds.includes(check.id),
+        ),
+        { id: '_format', command: ['npm', 'run', 'format:check'] },
+      ];
+      const measured = new Set<string>();
+      for (const check of requested) {
+        const identity = JSON.stringify(check.command);
+        if (measured.has(identity)) continue;
+        measured.add(identity);
+        checks.push({
+          id: check.id,
+          ...runReadOnlyCheck(cwd, check.command),
+        });
+      }
+    }
     return {
       pass: outOfScope.length === 0 && checks.every((check) => check.pass),
       fingerprint: fingerprint(cwd),

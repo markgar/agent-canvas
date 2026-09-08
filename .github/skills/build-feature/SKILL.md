@@ -5,7 +5,7 @@ description: Prepare or deliberately launch an approved Agent Canvas feature thr
 
 # Launch one approved feature
 
-Use this after `build-spec` and the separately reviewed build/test preparation.
+Use this after `build-spec` and review of the required runner/tooling baseline.
 This skill operates the repository's development workflow; it does not require
 or implement a host's native canvas capability.
 
@@ -20,10 +20,12 @@ or implement a host's native canvas capability.
    approve a spec, commit, or merge is not permission to spend model credits.
    Invoking this skill without clear execution consent means readiness only.
    Never start a run when the user says to stop before the build.
-3. For a fresh build after landing preparation, first confirm that the reviewed
-   preparation and spec are merged to the intended repository's `main`. Use a new,
-   dedicated feature worktree/session based on that main, not the preparation
-   worktree or the shared main checkout. Use the host's worktree/session tools
+3. Use a new dedicated feature worktree/session, not the shared main checkout or
+   a dirty preparation workspace. For a comparison, start from the explicitly
+   designated committed variant: prepared tests must not be merged into the common
+   clean baseline. Do not inspect another variant's code or reuse its conversation.
+   If the user requires the common baseline on main, confirm that separately;
+   variant-specific inputs stay on their variant branch. Use the host's session tools
    when available; do not assume a particular development app or canvas API.
 
 ## Confirm readiness without model calls
@@ -39,10 +41,11 @@ or implement a host's native canvas capability.
    spec differs between them. An approval-only spec commit is allowed; do not
    require baseline/HEAD equality. Intervening code, tooling, policy, or other
    spec changes require re-grounding and human review.
-7. Confirm the prepared build tooling, actual acceptance scripts/oracles, required
-   dependencies/browser binaries, and supported runtime exist. A future feature's
-   behavioral assertions may still fail before implementation; missing tooling,
-   skipped cases, and placeholder oracles are not readiness. Do not weaken checks,
+7. Confirm declared runners, existing accepted oracles, required shared tooling,
+   browser prerequisites, and supported runtime exist. New feature tests may be
+   authored alongside implementation within reviewed chunks; they need not already
+   exist on a clean variant. Existing prepared tests may fail for absent behavior.
+   Missing runners, skipped cases, and placeholder passes are not readiness. Do not weaken checks,
    alter governance, or silently install prerequisites as part of a launch.
 8. Read the configured model names from
    [the chain](../../../.chainkit/chains/build-feature.yaml). Confirm the operator

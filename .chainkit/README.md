@@ -24,6 +24,12 @@ Reviewing their meaning is an operator responsibility. Draft and completed specs
 cannot execute. Never put private email, source-system credentials, or production
 content into a spec or build prompt.
 
+Commands and existing acceptance tests are reviewed inputs. New feature tests and
+narrow helpers may be created alongside implementation in each reviewed chunk.
+An existing runner is required; a fully implemented future-feature test suite is
+not. Scaffold-only success never proves new behavior. Agents cannot weaken prior
+accepted assertions, scripts, or thresholds.
+
 ## Validate without model calls
 
 ```sh
@@ -62,14 +68,18 @@ prompts, findings, and command output; treat them as potentially sensitive.
 
 ## What a run does
 
-The planner assigns one to eight sequential chunks with disjoint exact file
-ownership. Each requirement and approved check must be assigned. The plan receives
+The planner assigns one to eight cohesive, context-sized sequential chunks with
+exact file ownership per active chunk. Later chunks may explicitly revisit a file;
+dependencies and preservation of earlier behavior are reviewed. Each requirement
+and approved check must be assigned. The plan receives
 a blocking independent review, with at most two planning rounds; deterministic
 plan completion has at most two attempts within each round.
 
 Each chunk receives the product/coding rules and literal selected spec sections,
-including their subsections. The builder edits, the host executes selected acceptance
-commands plus formatting, and a fresh reviewer sees the full spec and measured
+including their subsections. The builder writes the capability and focused tests.
+The host rebuilds current artifacts, then executes typechecking, baseline tests,
+selected acceptance commands and formatting. Build failure blocks checks against
+old artifacts. A fresh reviewer sees the full spec and measured
 facts. Builder notes are not evidence. A passing model verdict cannot override
 failed checks or out-of-scope files.
 
@@ -82,6 +92,23 @@ The final gate runs every approved acceptance command and `npm run check` on the
 assembled clean tree. Final failures stop; there is no automatic integration-repair
 stage. No run pushes, opens a PR, merges, sends email, or approves human acceptance.
 Checkpoint commits and failed changes remain available for inspection.
+
+## Comparing clean and prepared-test inputs
+
+Use the same behavioral contract and chain/model configuration on two committed
+variant branches. The clean checkout contains no prewritten feature acceptance
+suite; its planner assigns those tests with the capabilities. The prepared checkout
+adds its reviewed suite before its code baseline is selected. Each variant has
+its own approval-only spec commit and clean worktree. Never copy the preparation
+conversation or test code into the clean session, and never put both suites on
+the common main baseline while asking an agent to ignore one.
+
+Both use the same `chainkit:run` command and [build-feature skill](../.github/skills/build-feature/SKILL.md).
+Creating an idle session is not permission to execute it. Worktrees isolate files,
+not Git objects or machine resources; use independent clones/environments for a
+strict isolation experiment. Foreground/latency evidence must not overlap on one
+machine or compete with another build. Record preparation cost separately from
+each run, and evaluate public behavior rather than another variant's test ports.
 
 ## Boundaries and failure handling
 

@@ -8,32 +8,8 @@ approved_at: null
 checks:
   - id: scaffold-types
     command: [npm, run, typecheck]
-  - id: live-core
-    command: [node, scripts/check-live.mjs, --suite, core]
-  - id: live-security
-    command: [node, scripts/check-live.mjs, --suite, security]
-  - id: live-browser
-    command: [node, scripts/check-live-browser.mjs, --suite, behavior]
-  - id: live-latency-small
-    command:
-      - node
-      - scripts/check-live-browser.mjs
-      - --suite
-      - latency
-      - --bytes
-      - '10240'
-      - --samples
-      - '100'
-  - id: live-latency-large
-    command:
-      - node
-      - scripts/check-live-browser.mjs
-      - --suite
-      - latency
-      - --bytes
-      - '524288'
-      - --samples
-      - '100'
+  - id: feature-tests
+    command: [npm, test]
 ---
 
 ## Outcome
@@ -48,7 +24,7 @@ the app used to develop it. The consuming agent needs only a stdio-capable MCP
 host; it must not need this development app's canvas tools, extension APIs, skill
 system, side panels, or session orchestration.
 
-**Reviewable draft:** milestone 1 of `SPEC.md`, not implementation approval.
+Milestone 1 of `SPEC.md`; frontmatter records approval, not execution consent.
 Only the TypeScript/Node.js/Fastify/Zod scaffold and loopback health server exist;
 MCP, auth, rendering, and SSE contracts below are proposed behavior, not implemented
 capabilities. The baseline above is the inspected scaffold and build-system commit.
@@ -382,11 +358,12 @@ into shell DOM or give the frame the session secret.
 ### Implementation discretion
 
 Library selection within the maintained-library requirement, internal module
-subdivision, and browser bundler are implementation choices, not unresolved
+subdivision are implementation choices, not unresolved
 product behavior. Playwright Chromium and official SDK stdio are the selected
-acceptance/protocol technologies. No frontend framework is needed. Dependency and
-toolchain preparation must be separately reviewed as described under Acceptance;
-it cannot broaden the allowlist or change the wire contract.
+acceptance/protocol technologies. The shared build uses esbuild and the browser
+entry `src/client/shell/main.ts`; other internal module paths are not prescribed.
+No frontend framework is needed. MCP/sanitizer dependencies can be added with the
+relevant implementation chunk without broadening scope or changing wire behavior.
 
 ## Affected code
 
@@ -399,81 +376,58 @@ it cannot broaden the allowlist or change the wire contract.
 - Existing `src/contracts/health.ts` and its test: portable health schema;
   preserve `{"status":"ok","service":"agent-canvas"}` and its content-free purpose.
 - Proposed `src/contracts/display.ts`, server `display/`, `security/`, `mcp/`,
-  and client `shell/`, `rendering/` follow `docs/architecture.md`. Browser build/tests
-  are future work. An approved plan must resolve exact files and own each once.
+  and client `shell/`, `rendering/` follow `docs/architecture.md`. Browser application
+  and feature tests are future work. The plan resolves exact files, including any
+  explicit sequential revisits.
 - Existing `package.json`, `tsconfig.json`, `tsconfig.build.json`, and
-  `vitest.config.ts`: Node-only build/test configuration; no browser bundler,
-  Playwright, or MCP/sanitizer dependencies. The current build compiles only
-  server/contracts. Browser type boundaries, asset building, coverage integration,
-  and acceptance runners need separate preparation before this feature chain.
+  `vitest.config.ts`: shared scaffold/test configuration. `tsconfig.server.json`
+  and `tsconfig.client.json` enforce production runtime boundaries independently
+  of the mixed test program. `scripts/build.mjs` compiles server/contracts and
+  bundles the browser entry when present. Pinned esbuild/Playwright tooling exists,
+  but no feature test harness, MCP/sanitizer implementation, or browser UI exists.
   Existing npm scripts and protected quality-gate files cannot be changed by it.
 - Existing colocated HTTP/config/contract tests and `tests/integration/` cover the
-  scaffold. Feature integration/browser paths in `checks` are proposed, not
-  existing evidence. Update directly affected tests and README/architecture
+  scaffold. `feature-tests` discovers new tests written with each capability; its
+  existing scaffold results do not prove live behavior. Update README/architecture
   documentation with implementation, without rewriting approved acceptance tests.
 
 ## Acceptance
 
-All check definitions are **proposed for human review**. `scaffold-types` exists;
-all `live-*` checks reference future files and are **not runnable yet**.
-No check here was run as evidence of live features.
-Commands are read-only argv arrays executed without a shell; review underlying
-test scripts/oracles before approval. Planner selects these IDs, never edits them.
+This is the **chain-only input**: no prewritten feature suite or test adapter is
+supplied. The declared `scaffold-types` and `feature-tests` runners already exist.
+The planner assigns focused implementation tests, integration cases, and narrow
+fixtures alongside their capabilities in context-sized chunks. It must not write
+all tests or a whole application-shaped harness before the first capability.
 
-Prepare the browser build/typecheck/test integration, pinned tooling and browser
-binary, and actual acceptance oracles in a separate human-reviewed change before
-approving this feature. An executable harness that fails because a live feature
-is absent is expected; a missing tool, absent test file, skipped test, simulated
-browser, or placeholder assertion is not a prepared check. The harness must
-distinguish setup errors from behavioral assertions.
+The host builds current artifacts, typechecks, and runs existing regressions at
+each chunk. The independent reviewer requires concrete new assertions for every
+assigned requirement; green scaffold-only output does not satisfy this table.
+Run real browser cases when the shell and safety boundaries exist. Do not commit
+placeholder/skipped future cases, weaken accepted assertions, or grade mock
+implementations as the product. Final acceptance covers the complete table.
 
-Builders produce up-to-date compiled server and browser artifacts before
-measurement using the prepared build tooling, outside read-only acceptance commands.
-Acceptance rejects missing/stale artifacts and verifies the actual current-source
-build, not a previously built fixture. It does not install packages/browsers or
-rewrite source, checked-in fixtures, snapshots, or build outputs. Any unavoidable
-browser temporary profile/cache lives outside the repository and is cleaned up;
-use synthetic content only and disable recordings containing credentials.
-Each command stays within the host's two-minute limit. Latency workloads are
-separate commands so behavior tests do not share their time budget.
-Preparation changes code/config, so re-ground and review this draft again afterward.
+Check commands run read-only, without installs or rebuilding outputs. The host's
+separate build step provides current compiled artifacts before measurement.
+Actual MCP/HTTP/browser integration must exercise those outputs. Keep assertions
+and reports free of credentials/content; all fixtures are synthetic. Browser
+temporary profiles/cache belong outside the repository and must be cleaned up.
+Each invoked check has the host's two-minute budget; structure tests so unrelated
+setup does not consume timing evidence. A timeout is a failure, not permission
+to lower sample counts or omit obligations. Do not run latency evidence while
+another build or foreground browser measurement competes on the same machine.
 
-Prepared runners select fixed, reviewed suites rather than arbitrary commands.
-They reserve time for cleanup within the host's 120-second command limit and
-emit a bounded, versioned, content-free result. Exit 0 means all required
-assertions passed; exit 1 means incomplete/incorrect feature behavior; exit 2
-means runner/setup failure. The host recognizes that distinction only for the
-exact registered live-runner commands and validates their result envelope.
-Ordinary tools retain their own exit-code semantics. Missing/malformed reports
-or missing tooling stop the run; a valid scaffold lacking MCP/browser behavior
-is a genuine behavioral failure, not a passing check or an installation failure.
-
-Baseline CI retains scaffold/tooling tests and coverage, separating only the two
-registered live integration acceptance entry files from default test discovery.
-The live suites remain independently runnable and fail honestly before feature
-implementation. As explicitly selected during preparation review, live CI runs
-on source-changing PRs, explicit manual invocation, and every change once the
-feature is complete; completion in either the base or head activates it.
-Before completion, changes to established live regression/build paths also
-activate it once the base tree contains the implementation. Merely approving the
-spec does not activate live CI and prevent preparation from landing first.
-Unknown status or unavailable comparison history is a gate error, not permission
-to omit acceptance. Chainkit always runs the selected feature's approved checks,
-regardless of the CI activation rule. Green baseline CI alone is not feature
-acceptance.
-
-| Requirement IDs    | Check IDs                                                       | Required automated evidence                                                                                                                                                                                                              |
-| ------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| LIVE-001, LIVE-002 | scaffold-types, live-core                                       | Launch actual compiled entry point via official SDK client; exactly three tools and result/error envelopes; clean stdout and safe stderr; startup failure, stdin EOF/signals, and stream counts.                                         |
-| LIVE-003, LIVE-004 | live-core, live-security                                        | Unknown keys/types, blank/200/201-code-point titles, raw and normalized byte boundaries, multibyte input, text-empty failure, warning order, serial concurrent calls, overflow, no state change on failure, restart/clear.               |
-| LIVE-005, LIVE-006 | live-core, live-browser                                         | Subscribe/mutate race; UTF-8/SSE framing and size bounds; stale/duplicate/new-instance events; heartbeat/status handling; multi-tab reconnect/clear without shell reload; terminal 401/403 and retryable 429/503.                        |
-| LIVE-007           | live-security, live-browser                                     | Allowlist positive/negative cases; hostile scripts/SVG/forms/frames/links, encoded CSS URLs and style breakout; no execution/navigation/remote requests/shell changes; nonce/CSP styling works, including inline precedence.             |
-| LIVE-008, LIVE-009 | live-security, live-browser                                     | Exact Host/Origin and error precedence; body/media limits; token/cookie failures, bootstrap reuse at cap, 24-hour idle expiry, active sessions, restart invalidation, global stream cap, no-store and no application logs/storage leaks. |
-| LIVE-010           | live-browser                                                    | Synthetic readable email, missing-header handling, distinct recommendation; no real-message fixtures.                                                                                                                                    |
-| LIVE-011           | live-core, live-browser, live-latency-small, live-latency-large | Bounded pending state/backpressure eviction and count cleanup; silent-stream loss within 15 seconds; per-size foreground rendering latency.                                                                                              |
+| Requirement IDs    | Check IDs                     | Required automated evidence                                                                                                                                                                                                              |
+| ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LIVE-001, LIVE-002 | scaffold-types, feature-tests | Launch actual compiled entry point via official SDK client; exactly three tools and result/error envelopes; clean stdout and safe stderr; startup failure, stdin EOF/signals, and stream counts.                                         |
+| LIVE-003, LIVE-004 | feature-tests                 | Unknown keys/types, blank/200/201-code-point titles, raw and normalized byte boundaries, multibyte input, text-empty failure, warning order, serial concurrent calls, overflow, no state change on failure, restart/clear.               |
+| LIVE-005, LIVE-006 | feature-tests                 | Subscribe/mutate race; UTF-8/SSE framing and size bounds; stale/duplicate/new-instance events; heartbeat/status handling; multi-tab reconnect/clear without shell reload; terminal 401/403 and retryable 429/503.                        |
+| LIVE-007           | feature-tests                 | Allowlist positive/negative cases; hostile scripts/SVG/forms/frames/links, encoded CSS URLs and style breakout; no execution/navigation/remote requests/shell changes; nonce/CSP styling works, including inline precedence.             |
+| LIVE-008, LIVE-009 | feature-tests                 | Exact Host/Origin and error precedence; body/media limits; token/cookie failures, bootstrap reuse at cap, 24-hour idle expiry, active sessions, restart invalidation, global stream cap, no-store and no application logs/storage leaks. |
+| LIVE-010           | feature-tests                 | Synthetic readable email, missing-header handling, distinct recommendation; no real-message fixtures.                                                                                                                                    |
+| LIVE-011           | feature-tests                 | Bounded pending state/backpressure eviction and count cleanup; silent-stream loss within 15 seconds; per-size foreground rendering latency.                                                                                              |
 
 Latency procedure: macOS, one foreground Playwright Chromium tab, warm authenticated
-connection, no concurrent load. Each latency check sends 100 sequential synthetic
+connection, no concurrent load. For each payload size, send 100 sequential synthetic
 updates at its exact raw HTML-plus-CSS byte size (10 KiB or 512 KiB), including a
 unique visible revision marker. Await visibility before sending the next update;
 do not silently coalesce samples. Use real text/layout fixtures, not padding that
@@ -490,25 +444,16 @@ foreground rendering, not physical screen scanout or user attention.
 Keep the browser foreground during loss-timing checks as well; idle-session
 expiry and revision overflow may use injected clocks/state in non-browser tests.
 
-For deterministic component evidence, preparation defines reviewed test-side
-ports and scenarios in `tests/acceptance/seams.ts`. The future feature supplies
-`tests/acceptance/product-adapter.ts`, exporting `createProductAdapter()`, as a
-thin binding to actual production factories. It must provide the reviewed
-display, session, and HTTP probe capabilities without duplicating product logic.
-The adapter is feature implementation work, not a prerequisite mock supplied to
-make preparation appear successful. Its absence is named behavioral
-incompleteness, never a skip or a fabricated pass.
-
-These component scenarios may inject a monotonic clock/state seed, controlled
-writers/drain/failure and scheduling barriers, and sanitizer output/failure.
+Component tests may inject a monotonic clock/state seed, controlled writers and
+scheduling barriers, or sanitizer output/failure into actual production logic.
 They prove revision overflow, exact idle expiry, atomic subscription/serialization,
 one-pending-snapshot/backpressure behavior, and safe processing failures.
 The exact normalized 1 MiB boundary uses controlled sanitizer output because
 generated-ID serialization is not a fixed raw-input contract; actual sanitizer
 integration and expansion cases remain mandatory separately.
-The adapter must call real production operations, observe actual pending state,
-and release resources. Review its delegation against production call paths before
-acceptance; matching a structural interface is not evidence of correct binding.
+No particular test adapter, factory interface, or internal file organization is
+required. Helpers must call real production operations, observe actual state, and
+release resources; review their bindings rather than trusting structural types.
 No production debug endpoint, test-only MCP/IPC protocol, global test API, or
 environment-triggered access bypass is permitted. Independent actual compiled-
 process, HTTP, and browser evidence remains mandatory and cannot be replaced by
@@ -534,20 +479,18 @@ means stop at synthetic content; synthetic tests cannot complete this manual ste
   text/table/flex HTML/CSS subset; both CSS-field and inline styles normalized into
   nonce-authorized rules; cookie reuse and 24-hour idle expiry. These choices
   resolve the previous support, rendering, and session questions, not approval.
-- **Preparation review choices (2026-09-08):** explicit baseline/live CI separation
-  as described under Acceptance; bounded, safely reporting core/security
-  wrappers; test-side bindings for deterministic component evidence rather than
-  debugging capabilities in the shipped application. Actual prepared oracles
-  and bindings still require review; these choices do not authorize a paid run.
+- **Chain-only experiment input:** use shared build/runtime tooling and write
+  feature tests with each implementation chunk. Do not import a prepared suite,
+  another variant's test ports, or its conversation into this checkout.
 - **Contract clarifications in this draft:** public shell versus authenticated
   content, named observable heartbeats with status-aware fetch streaming,
   inherited CSP compatibility, exact error precedence and limits, and automated
   versus human evidence are specified above rather than left to a planner.
-  Library/module/bundler choices remain bounded implementation discretion.
-- **Remaining readiness prerequisites, not open product questions:** separate
-  human-reviewed tooling/acceptance preparation, a new reviewed code baseline
-  afterward, and explicit human approval of this complete contract and its
-  actual oracles. Until those are satisfied, the feature is not execution-ready.
+  Library/module choices remain bounded implementation discretion.
+- **Approval and launch remain separate:** record an inspected code baseline
+  and explicit human approval of this contract. No additional full-feature test
+  preparation is required for this variant. Missing shared runners or required
+  runtime tools remain blockers, not permission to fabricate evidence.
 - Explicit user approval alone changes approval status/metadata. Agent never
   self-approves. `base_commit` is reviewed code; later approved-spec commits are valid.
   Intervening non-spec code/config requires re-grounding. Stop for stale/blocked

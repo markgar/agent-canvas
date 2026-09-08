@@ -59,8 +59,12 @@ state store inside a route handler or make MCP call the server's own HTTP API.
 Pass dependencies explicitly; avoid a service locator or dependency-injection
 framework.
 
-The browser will get its own DOM-only TypeScript configuration and build entry
-point. It can remain in this package while shipping with the same server.
+`tsconfig.server.json` and `tsconfig.client.json` check production Node and DOM
+boundaries independently of the mixed test program; contracts remain portable.
+The shared build compiles the server and bundles `src/client/shell/main.ts` with
+esbuild when that entry exists. No browser application is manufactured while it
+is absent. Playwright tooling is installed separately with `npm run browser:install`.
+There is no prewritten live-feature acceptance suite in the chain-only baseline.
 
 ## When to split
 
@@ -74,7 +78,8 @@ Keep email authorization and execution in the assistant's existing integrations.
 ## Deliberate deferrals
 
 - MCP SDK: install when implementing the stdio adapter.
-- Browser bundling and browser tests: add with the first browser implementation.
+- Browser application and feature tests: implement together in bounded chunks;
+  minimal bundling and browser tooling are already available.
 - Sanitizer and CSP: select and test together before accepting HTML.
 - Persistence: in-memory current state first, with explicit restart semantics.
 - Logging framework: add when useful, with redaction and stdout isolation.

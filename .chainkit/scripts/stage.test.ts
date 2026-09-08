@@ -20,6 +20,7 @@ import {
   requireFreshBase,
 } from './repository.js';
 import { executeStage } from './stage.js';
+import { runStateSchema } from './state.js';
 import { examplePlan, exampleSpec } from './test-fixtures.js';
 
 describe('consumer-owned chain gates', () => {
@@ -59,6 +60,9 @@ describe('consumer-owned chain gates', () => {
     mkdirSync(state);
     artifacts = path.join(root, 'artifacts.json');
     const scripts = {
+      build: 'node -e "process.exit(0)"',
+      typecheck: 'node -e "process.exit(0)"',
+      test: 'node -e "process.exit(0)"',
       'format:check': 'node -e "process.exit(0)"',
       check: 'node -e "process.exit(0)"',
     };
@@ -197,6 +201,44 @@ describe('consumer-owned chain gates', () => {
     expect(() => executeStage('chunk-gate')).toThrow('passing review');
   });
 
+  it('builds current code and runs regressions even when the chunk selects another check', () => {
+    prepare();
+    makeChange();
+    expect(executeStage('measure')).toMatchObject({
+      pass: true,
+      checks: [
+        { id: '_build', command: ['npm', 'run', 'build'] },
+        { id: '_typecheck', command: ['npm', 'run', 'typecheck'] },
+        { id: '_regressions', command: ['npm', 'test'] },
+        { id: 'behavior' },
+        { id: '_format' },
+      ],
+    });
+  });
+
+  it('does not run acceptance against old artifacts when the build fails', () => {
+    const stateFile = path.join(state, 'run.json');
+    const run = runStateSchema.parse(
+      JSON.parse(readFileSync(stateFile, 'utf8')),
+    );
+    run.scripts['build'] = 'node -e "process.exit(1)"';
+    writeJson(path.join(work, 'package.json'), { scripts: run.scripts });
+    git(work, 'add', '.');
+    git(work, 'commit', '-qm', 'failing build fixture');
+    run.initialFingerprint = fingerprint(work);
+    writeJson(stateFile, run);
+    prepare();
+    makeChange();
+    expect(executeStage('measure')).toMatchObject({
+      pass: false,
+      checks: [{ id: '_build', pass: false }],
+    });
+    supply({
+      facts: executeStage('measure'),
+      review: { pass: true, findings: [] },
+    });
+    expect(executeStage('decide')).toMatchObject({ pass: false });
+  });
   it('rejects a reviewed no-op chunk and an edit after passing review', () => {
     prepare();
     let facts = executeStage('measure');

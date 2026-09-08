@@ -54,8 +54,8 @@ repository summaries. Prefer enforcement in code, schemas, lint boundaries, and
 tests where possible. Humans maintain the remaining policy and resolve conflicts.
 Human approval of integration, security, or protocol documents establishes design
 authority only; it does not authorize a paid build or establish implementation.
-The current product specification and live-display feature remain drafts;
-workflow policy does not approve their proposed protocols.
+The product specification and feature frontmatter record their own review
+status; workflow policy does not approve proposed protocols.
 Approval metadata records declared approval, not cryptographic human
 authentication.
 
@@ -77,12 +77,12 @@ function would create a second implementation to maintain. Ambiguity research [3
 favors targeted behavioral clarification over indiscriminate expansion; it does
 not establish an ideal spec length.
 
-Humans review acceptance commands and their underlying oracles, not just prose.
-Checks are argv arrays executed without shell interpretation; planners select
-existing IDs rather than inventing substitute commands. Proposed checks may appear
-in drafts, but must become runnable and reviewed before execution approval. Missing
-test infrastructure is preparation work, not permission to accept an empty run.
-Generated implementation tests can supplement reviewed checks, not redefine them.
+Humans review acceptance commands and existing oracles, not just prose. Runners
+must exist before execution; new feature tests and narrow fixtures can be written
+with implementation in reviewed chunks. Checks remain argv arrays and planners
+select existing IDs. This avoids turning readiness into a whole-feature test
+implementation project ahead of the planner. New tests cannot weaken existing
+accepted obligations, and a green scaffold is not evidence of new behavior.
 
 The [wrapper](../.chainkit/scripts/cli.ts) requires an approved document, nonempty
 approval fields and checks, and a clean worktree. Common blocking placeholders are
@@ -142,18 +142,18 @@ Human-reviewed invariants + complete approved feature + fresh repository
 | Final gate            | All approved feature commands and repository-wide `npm run check`                                                 | Integration failure stops; human acceptance remains separate        |
 
 The plan contains chunk `id`, `title`, `files`, `specRefs`, `requirementIds`,
-`checkIds`, and `blueprint`. Mechanical validation rejects overlapping ownership,
+`checkIds`, and `blueprint`. Mechanical validation rejects duplicate paths within a chunk,
 invalid/protected paths, ambiguous section references, unknown IDs, and missing
 coverage. Mentioning every ID is not proof of behavioral coverage: a fresh reviewer
 must challenge the blueprint and whether chosen checks distinguish correct from
 incorrect behavior. The plan/review loop is bounded to two rounds.
 
 Sequential chunks deliberately reject speculative parallelism. Earlier chunks are
-committed before later work begins; each file has one owner. This reduces merge
-conflicts and ambiguous responsibility, but can force larger chunks around shared
-files and increases elapsed time. Eight is an operational ceiling, not an
-experimentally derived optimum. Requirements needing the same files should be
-combined rather than split into artificial independent assignments.
+committed before later work begins. A later chunk may explicitly revisit a file
+listed in its reviewed assignment, rather than forcing unrelated capabilities
+into one oversized chunk. Eight is an operational ceiling, not a context budget;
+plan review must reject chunks too broad to understand with their focused tests.
+If the feature cannot fit, reduce its scope rather than bypass that review.
 
 Builders receive precise sections rather than the planner's paraphrase alone.
 Reviewers receive the full feature so omitted context remains discoverable, while
@@ -163,8 +163,9 @@ statistical independence. Fixers receive findings and measurements, and every re
 gets a fresh review that can identify new regressions.
 
 The executable [stage adapter](../.chainkit/scripts/stage.ts) combines reviewer
-acceptance with measured acceptance. Chunk measurements run selected approved
-checks and formatting; the chunk `gate` repeats measurement before checkpointing.
+acceptance with measured acceptance. Chunk measurements rebuild current artifacts, then run typechecking, baseline
+regressions, selected approved checks and formatting; the chunk `gate` repeats
+measurement before checkpointing. A failed build cannot use old artifacts.
 Loop bounds use `max`. The final `gate` reruns every approved feature check plus
 `npm run check` against the assembled clean tree. No final integration-repair loop
 is configured. There is no push, PR creation, merge, or automatic human approval.
@@ -231,7 +232,8 @@ Model reply streams and the builder's edit are fixture substitutes. This is real
 executor integration evidence, not a paid model build, evidence of model reasoning
 quality, or live-product acceptance. Contract and stage tests separately exercise
 mechanical rules. The current [live-display draft](../specs/001-live-display.md)
-has proposed, unavailable acceptance checks and is not execution approval.
+uses existing runners with new feature tests assigned to implementation chunks.
+Neither scaffold success nor the document's existence is execution approval.
 
 Runs write records and logs under `.chainkit/results/`; coordination state is
 temporary. For an auditable delivery, retain the exact feature, base and final

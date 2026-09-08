@@ -55,8 +55,10 @@ This example is not a runnable check. Commands are argv arrays, never shell
 strings; no pipes, installs, or write-mode commands. Mark future checks proposed
 and not runnable yet. Empty checks are valid only while `status: draft`.
 
-Human review covers each check and its underlying oracle. Planners only select
-IDs; neither planner nor repair agent may edit reviewed checks to obtain a pass.
+Human review covers each command and existing oracle. A declared runner may
+discover new feature assertions authored with implementation in reviewed chunks.
+Map that future evidence explicitly; existing scaffold success is not feature
+acceptance. Planners select IDs; agents may not weaken accepted checks to pass.
 
 ## Decisions
 
@@ -69,7 +71,8 @@ IDs; neither planner nor repair agent may edit reviewed checks to obtain a pass.
   committing the approved spec afterward is valid. Intervening non-spec code/config
   changes require re-grounding and human review. Stop if stale or blocked.
   Chunks use `id`, `title`, `files`, `specRefs`, `requirementIds`, `checkIds`,
-  `blueprint`; exact files are owned once and refs use literal heading names.
+  `blueprint`; exact files may have reviewed sequential revisits and refs use
+  literal heading names.
 - Feature chains cannot edit protected build policy, vendor, spec, or quality-gate
   files; workflow changes are separate human-reviewed work.
 - Follow staged selective rule injection, the plan gate, sequential bounded

@@ -124,7 +124,21 @@ describe('feature contracts', () => {
     }).not.toThrow();
   });
 
-  it('rejects empty, oversized, overlapping, or incomplete plans', () => {
+  it('allows explicitly planned sequential revisits but rejects duplicate paths within a chunk', () => {
+    const spec = parseSpec(exampleSpec());
+    const chunk = examplePlan().chunks[0];
+    expect(() =>
+      validatePlan({ chunks: [chunk, { ...chunk, id: 'later' }] }, spec),
+    ).not.toThrow();
+    expect(() =>
+      validatePlan(
+        { chunks: [{ ...chunk, files: ['src/value.ts', 'src/value.ts'] }] },
+        spec,
+      ),
+    ).toThrow('Duplicate file in chunk');
+  });
+
+  it('rejects empty, oversized, or incomplete plans', () => {
     const spec = parseSpec(exampleSpec());
     const chunk = examplePlan().chunks[0];
     expect(() => validatePlan({ chunks: [] }, spec)).toThrow();
@@ -134,9 +148,6 @@ describe('feature contracts', () => {
     expect(() => validatePlan({ chunks: [chunk, chunk] }, spec)).toThrow(
       'Duplicate chunk',
     );
-    expect(() =>
-      validatePlan({ chunks: [chunk, { ...chunk, id: 'another' }] }, spec),
-    ).toThrow('overlaps');
     expect(() =>
       validatePlan(
         { chunks: [{ ...chunk, requirementIds: ['EX-999'] }] },

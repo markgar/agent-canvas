@@ -2,7 +2,7 @@
 id: 001-live-display
 title: Live read-only display
 status: draft
-base_commit: f75f49257bcd9aa49870d64805b100158a8baf99
+base_commit: 2523c4235a81fb450a1cc3f8dae117f6dbdb1066
 approved_by: null
 approved_at: null
 checks:
@@ -52,8 +52,8 @@ for the actual host. Copilot CLI is a compatibility target, not a runtime
 dependency or a requirement that the consuming agent have native canvas support.
 All interaction uses standard MCP tool discovery/calls and an ordinary browser;
 manual URL opening must work when the consuming agent cannot open a browser.
-Retain the repository's Node.js 22.14+ (22.x) and 24.x support;
-run core/protocol acceptance on both. Firefox, WebKit/Safari, other MCP hosts, and
+Support Node.js 22.14+ (22.x) for this milestone and run core/protocol acceptance
+on that runtime. Node.js 24 compatibility is deferred. Firefox, WebKit/Safari, other MCP hosts, and
 Windows/Linux end-to-end behavior are unverified, not promised by this milestone.
 
 Governance: [product](../.chainkit/governance/product.md), [planning](../.chainkit/governance/planning.md), [coding](../.chainkit/governance/coding.md), [reviewing](../.chainkit/governance/reviewing.md).

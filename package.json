@@ -1,0 +1,46 @@
+{
+  "name": "agent-canvas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local, MCP-driven visual surface for AI assistants.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": "^22.14.0 || ^24.0.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server/main.ts",
+    "build": "tsc --project tsconfig.build.json",
+    "start": "node dist/server/main.js",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.contracts.json",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "chainkit:validate": "tsx .chainkit/scripts/cli.ts validate",
+    "chainkit:run": "tsx .chainkit/scripts/cli.ts run",
+    "chainkit:vendor": "tsx .chainkit/scripts/vendor.ts",
+    "chainkit:selftest": "node vendor/chainkit/selftest.mjs && node vendor/chainkit/completion.selftest.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run chainkit:validate && npm run test:coverage && npm run build"
+  },
+  "dependencies": {
+    "fastify": "^5.12.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "4.0.18",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "4.0.18",
+    "yaml": "^2.8.1"
+  }
+}

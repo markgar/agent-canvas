@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.chainkit/results/
+.chainkit/runtime/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

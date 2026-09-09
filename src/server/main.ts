@@ -10,9 +10,20 @@ function reportFailure(error: unknown): void {
 
 async function main(): Promise<void> {
   const config = readConfig(process.env);
+  let protocolClosed = false;
   const runtime = createRuntime(config, {
     onProtocolError() {
       console.error('Agent Canvas MCP protocol or transport error.');
+    },
+    onProtocolClose(shutdownError) {
+      protocolClosed = true;
+      process.exitCode = 1;
+      process.stdin.pause();
+      console.error('Agent Canvas MCP transport closed unexpectedly.');
+      if (shutdownError !== undefined) {
+        reportFailure(shutdownError);
+      }
+      process.exit(1);
     },
   });
   const address = await runtime.start();
@@ -32,7 +43,9 @@ async function main(): Promise<void> {
     void shutdown().catch(reportFailure);
   });
   process.stdin.once('end', () => {
-    void shutdown().catch(reportFailure);
+    if (!protocolClosed) {
+      void shutdown().catch(reportFailure);
+    }
   });
   if (process.stdin.readableEnded) {
     await shutdown();

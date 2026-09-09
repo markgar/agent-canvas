@@ -76,6 +76,7 @@ export interface CreateMcpServerOptions {
   displayService: DisplayService;
   getStatus: () => StatusResult;
   onProtocolError?: () => void;
+  onProtocolClose?: () => void;
 }
 
 export interface CanvasMcpServer {
@@ -120,9 +121,15 @@ export function createMcpServer(
       },
     },
   );
+  let closing = false;
 
   server.onerror = () => {
     options.onProtocolError?.();
+  };
+  server.onclose = () => {
+    if (!closing) {
+      options.onProtocolClose?.();
+    }
   };
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -167,6 +174,7 @@ export function createMcpServer(
       return server.connect(transport);
     },
     close() {
+      closing = true;
       return server.close();
     },
   };

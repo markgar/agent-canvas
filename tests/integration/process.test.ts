@@ -37,6 +37,24 @@ describe('compiled process entry point', () => {
     expect(process.stdout).toBe('');
   });
 
+  it('shuts down HTTP and exits nonzero after a fatal MCP transport failure', async () => {
+    const process = CanvasChildProcess.spawn();
+    processes.push(process);
+    const address = await process.waitForAddress();
+
+    const chunk = 'x'.repeat(64 * 1024);
+    for (let index = 0; index < 161; index += 1) {
+      process.writeInput(chunk);
+    }
+
+    expect(await process.waitForExit()).toEqual([1, null]);
+    await expect(fetch(`${address}/health`)).rejects.toThrow();
+    expect(process.stderr).toContain(
+      'Agent Canvas MCP transport closed unexpectedly.',
+    );
+    expect(process.stdout).toBe('');
+  });
+
   it('fails safely when the requested port is occupied', async () => {
     const occupied = createServer();
     await new Promise<void>((resolve, reject) => {

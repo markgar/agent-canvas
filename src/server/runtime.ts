@@ -23,6 +23,7 @@ interface RuntimeOptions {
   createHttpServer?: typeof createServer;
   createProtocolServer?: (options: CreateMcpServerOptions) => CanvasMcpServer;
   onProtocolError?: () => void;
+  onProtocolClose?: (shutdownError?: Error) => void;
 }
 
 export interface CanvasRuntime {
@@ -63,14 +64,6 @@ export function createRuntime(
     };
   };
 
-  const protocolServer = (options.createProtocolServer ?? createMcpServer)({
-    displayService,
-    getStatus,
-    ...(options.onProtocolError === undefined
-      ? {}
-      : { onProtocolError: options.onProtocolError }),
-  });
-
   const close = (): Promise<void> => {
     closePromise ??= (async () => {
       available = false;
@@ -84,6 +77,26 @@ export function createRuntime(
     })();
     return closePromise;
   };
+
+  const protocolServer = (options.createProtocolServer ?? createMcpServer)({
+    displayService,
+    getStatus,
+    ...(options.onProtocolError === undefined
+      ? {}
+      : { onProtocolError: options.onProtocolError }),
+    onProtocolClose() {
+      void close().then(
+        () => {
+          options.onProtocolClose?.();
+        },
+        () => {
+          options.onProtocolClose?.(
+            new Error('Agent Canvas shutdown did not complete cleanly.'),
+          );
+        },
+      );
+    },
+  });
 
   return {
     start() {

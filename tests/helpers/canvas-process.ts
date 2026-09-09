@@ -493,6 +493,10 @@ export class CanvasChildProcess {
     this.#child.stdin.end();
   }
 
+  writeInput(value: string): void {
+    this.#child.stdin.write(value);
+  }
+
   signal(signal: NodeJS.Signals): void {
     this.#child.kill(signal);
   }

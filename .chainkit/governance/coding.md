@@ -10,7 +10,8 @@ approved spec sections. Do not load unrelated specs or the entire policy set.
   Stop for unexpected drift, blocked decisions, or product/spec conflicts.
 - **CODE-002 — One bounded chunk.** Execute chunks sequentially. Change only the
   current chunk's exact owned files for its requirement IDs and blueprint.
-  Do not borrow another chunk's files or hide supporting scope in a repair.
+  Later sequential revisits are permitted only when listed in the reviewed plan.
+  Do not borrow an unlisted file or hide supporting scope in a repair.
 - **CODE-003 — Preserve intent.** Implement approved outcomes, failure behavior,
   negative cases, and load-bearing design. Optional mechanics are latitude, not
   permission to change contracts, authority, privacy, or acceptance.
@@ -21,10 +22,16 @@ approved spec sections. Do not load unrelated specs or the entire policy set.
   argv arrays without shell interpretation. Record command identity, exit status,
   and relevant evidence. Missing checks, skipped cases, or unavailable tools are
   blockers, never passing results.
+  Implement focused tests alongside each capability. The host rebuilds current
+  artifacts and runs typechecking and baseline regressions before selected checks.
+  A failed build must not be graded against old outputs. Scaffold tests alone
+  do not demonstrate the chunk's newly assigned behavior.
 - **CODE-006 — No weaker oracle.** Never edit reviewed checks, underlying tests,
   scripts, thresholds, or configuration merely to pass. Do not remove assertions,
   suppress failures, add skips, disable security controls, or bless new snapshots
   as a repair. Legitimate oracle changes require separate human review.
+  New tests within an unaccepted chunk may be refined against the approved
+  behavior during independent review; do not remove a failing obligation.
 - **CODE-007 — No hidden changes.** No unrelated refactors, dependencies, generated
   churn, persistence, credentials, or infrastructure. Preserve others' work.
   Stop for an amended plan if the necessary fix exceeds ownership or scope.

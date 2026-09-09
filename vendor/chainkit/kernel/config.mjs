@@ -12,6 +12,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { placeholders, rootOf } from "./context.mjs";
 import { modelWarnings } from "./models.mjs";
+import { providerFor } from "./providers.mjs";
 
 // Every key a stage may carry. An unknown key is a HARD ERROR, not a warning.
 //
@@ -22,6 +23,8 @@ import { modelWarnings } from "./models.mjs";
 const STAGE_KEYS = new Set([
   "id",
   "prompt",
+  "resumePrompt",
+  "resumeFrom",
   "run",
   "produces",
   "parse",
@@ -42,7 +45,7 @@ const STAGE_KEYS = new Set([
 // that belief survive, and the run record would then show a stage with a model that
 // never ran -- unreadable next to a real one. Same reasoning as requiring every
 // model stage to name its model, inverted.
-const MODEL_ONLY_KEYS = ["model", "effort", "tools", "resume"];
+const MODEL_ONLY_KEYS = ["model", "effort", "tools", "resume", "resumePrompt", "resumeFrom"];
 
 // The types an `expects` declaration may name. Deliberately tiny: this exists to
 // catch a broken key contract, not to be a schema language.
@@ -54,16 +57,16 @@ const CHAIN_KEYS = new Set([
   "stages",
   "loop",
   "foreach",
-  "gate",
-  "preflight",
+  "completion",
+  "requires",
   "seeds",
   "note",
 ]);
 const LOOP_KEYS = new Set(["stages", "until", "max", "note"]);
 // `onExhausted` exists ONLY on the chain-level loop, which is why this is a separate
 // set rather than a member of LOOP_KEYS. A foreach's inner loop is always followed by
-// that element's own gate -- the objective signal that overrides the reviewer's
-// opinion -- so stopping before the gate would discard the very check that decides
+// that element's own completion -- the objective signal that overrides the reviewer's
+// opinion -- so stopping before completion would discard the very check that decides
 // the element. The chain loop has no such guarantee: what follows it may be a fan-out
 // that spends many times the loop's own cost on the artifact the loop just failed to
 // ratify. So the question "is running on regardless acceptable?" is only meaningful
@@ -74,11 +77,20 @@ const ON_EXHAUSTED = new Set(["halt", "continue"]);
 // nothing about what it is iterating. `over` names an artifact that happens to be
 // an array; `as` binds each element under a name the prompts render. That the
 // elements are "chunks of work" is a fact about the prompt, never about the engine.
-const FOREACH_KEYS = new Set(["over", "as", "stages", "loop", "gate", "expects", "max", "note"]);
-const COMPLETION_KEYS = new Set(["run", "max", "note"]);
-const PREFLIGHT_KEYS = new Set(["run", "note"]);
-const GATE_KEYS = new Set(["run", "repair", "note"]);
-const GATE_REPAIR_KEYS = new Set(["stages", "max", "note"]);
+const FOREACH_KEYS = new Set([
+  "over",
+  "as",
+  "stages",
+  "loop",
+  "completion",
+  "expects",
+  "max",
+  "note",
+]);
+const COMPLETION_KEYS = new Set(["run", "attempts", "repair", "note"]);
+const AGENT_COMPLETION_KEYS = new Set(["run", "attempts", "note"]);
+const REQUIRES_KEYS = new Set(["run", "note"]);
+const COMPLETION_REPAIR_KEYS = new Set(["stages", "note"]);
 const PARSE_MODES = new Set(["text", "json"]);
 
 function unknownKeys(obj, allowed, where) {
@@ -88,6 +100,57 @@ function unknownKeys(obj, allowed, where) {
 }
 
 const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+
+function sessionLocation(chain, stages, id) {
+  const stageIndex = stages.findIndex((s) => s.id === id);
+  if (stageIndex < 0) return null;
+  const fe = chain.foreach || null;
+  const feIds = new Set(fe?.stages || []);
+  const feLoopIds = new Set(fe?.loop?.stages || []);
+  const feRepair = fe?.completion?.repair?.stages || [];
+  if (feIds.has(id) || feRepair.includes(id)) {
+    if (feRepair.includes(id))
+      return { scope: "foreach", phase: 2, order: feRepair.indexOf(id), repeated: true };
+    if (feLoopIds.has(id))
+      return {
+        scope: "foreach",
+        phase: 1,
+        order: (fe.loop?.stages || []).indexOf(id),
+        repeated: true,
+      };
+    const firstPass = (fe?.stages || []).filter((stageId) => !feLoopIds.has(stageId));
+    return { scope: "foreach", phase: 0, order: firstPass.indexOf(id), repeated: false };
+  }
+
+  const repair = chain.completion?.repair?.stages || [];
+  if (repair.includes(id))
+    return { scope: "top", phase: 4, order: repair.indexOf(id), repeated: true };
+
+  const loopIds = new Set(chain.loop?.stages || []);
+  if (loopIds.has(id))
+    return {
+      scope: "top",
+      phase: 1,
+      order: (chain.loop?.stages || []).indexOf(id),
+      repeated: true,
+    };
+
+  const blockIndexes = [
+    stages.findIndex((s) => loopIds.has(s.id)),
+    stages.findIndex((s) => feIds.has(s.id)),
+  ].filter((i) => i >= 0);
+  if (!blockIndexes.length) return { scope: "top", phase: 0, order: stageIndex, repeated: false };
+  const first = Math.min(...blockIndexes);
+  const last = Math.max(...blockIndexes);
+  const phase = stageIndex < first ? 0 : stageIndex > last ? 3 : 2;
+  return { scope: "top", phase, order: stageIndex, repeated: false };
+}
+
+function isStrictlyEarlier(source, target) {
+  return (
+    source.phase < target.phase || (source.phase === target.phase && source.order < target.order)
+  );
+}
 
 // Validate WITHOUT spending anything. Every one of these is knowable before the
 // first model call, and a chain that cannot possibly work should never cost money
@@ -112,6 +175,23 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
     if (s.prompt && s.run) errors.push(`stage "${s.id}": has both prompt and run -- pick one`);
     if (s.run !== undefined && typeof s.run !== "string")
       errors.push(`stage "${s.id}": run must be a string (a shell command)`);
+    if (s.prompt !== undefined && typeof s.prompt !== "string")
+      errors.push(`stage "${s.id}": prompt must be a string (a prompt file)`);
+    if (
+      s.resumePrompt !== undefined &&
+      (typeof s.resumePrompt !== "string" || !s.resumePrompt.trim())
+    )
+      errors.push(`stage "${s.id}": resumePrompt must be a non-empty prompt file path`);
+    if (s.resumeFrom !== undefined && (typeof s.resumeFrom !== "string" || !s.resumeFrom.trim()))
+      errors.push(`stage "${s.id}": resumeFrom must be a non-empty earlier stage id`);
+    if (s.resumeFrom !== undefined && (s.resume ?? chain.defaults?.resume ?? false))
+      errors.push(`stage "${s.id}": resume and resumeFrom cannot be combined`);
+    if (
+      s.resumePrompt !== undefined &&
+      !(s.resume ?? chain.defaults?.resume ?? false) &&
+      !s.resumeFrom
+    )
+      errors.push(`stage "${s.id}": resumePrompt requires resume: true or resumeFrom`);
     if (s.run) {
       for (const k of MODEL_ONLY_KEYS)
         if (s[k] !== undefined)
@@ -130,12 +210,14 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
       ) {
         errors.push(`stage "${s.id}": completion must be a mapping`);
       } else {
-        errors.push(...unknownKeys(s.completion, COMPLETION_KEYS, `stage "${s.id}".completion`));
+        errors.push(
+          ...unknownKeys(s.completion, AGENT_COMPLETION_KEYS, `stage "${s.id}".completion`),
+        );
         if (typeof s.completion.run !== "string" || !s.completion.run.trim())
           errors.push(`stage "${s.id}".completion: run must be a non-empty shell command`);
-        if (!positiveInteger(s.completion.max))
+        if (!positiveInteger(s.completion.attempts))
           errors.push(
-            `stage "${s.id}".completion: max must be a positive safe integer (bound the retries)`,
+            `stage "${s.id}".completion: attempts must be a positive safe integer (total checks including the initial attempt)`,
           );
       }
     }
@@ -204,32 +286,32 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
     }
   }
 
-  if (chain.preflight !== undefined) {
+  if (chain.requires !== undefined) {
     if (
-      typeof chain.preflight !== "object" ||
-      chain.preflight === null ||
-      Array.isArray(chain.preflight)
+      typeof chain.requires !== "object" ||
+      chain.requires === null ||
+      Array.isArray(chain.requires)
     ) {
-      errors.push("preflight: must be a mapping");
+      errors.push("requires: must be a mapping");
     } else {
-      errors.push(...unknownKeys(chain.preflight, PREFLIGHT_KEYS, "preflight"));
-      if (typeof chain.preflight.run !== "string" || !chain.preflight.run.trim())
-        errors.push("preflight: run must be a non-empty shell command");
+      errors.push(...unknownKeys(chain.requires, REQUIRES_KEYS, "requires"));
+      if (typeof chain.requires.run !== "string" || !chain.requires.run.trim())
+        errors.push("requires: run must be a non-empty shell command");
       else {
-        for (const ref of placeholders(chain.preflight.run)) {
+        for (const ref of placeholders(chain.requires.run)) {
           const root = rootOf(ref);
           if (!(root in (chain.seeds || {})))
-            errors.push(`preflight: run references {{${ref}}}, which is not a seed`);
+            errors.push(`requires: run references {{${ref}}}, which is not a seed`);
           else {
             const value = chain.seeds[root];
             if (ref !== root)
-              errors.push(`preflight: run references field {{${ref}}} on scalar seed "${root}"`);
+              errors.push(`requires: run references field {{${ref}}} on scalar seed "${root}"`);
             else if (
               (typeof value === "string" && value.startsWith("@")) ||
               (value !== null && typeof value === "object")
             )
               errors.push(
-                `preflight: run interpolates {{${ref}}}, which is not a scalar literal seed`,
+                `requires: run interpolates {{${ref}}}, which is not a scalar literal seed`,
               );
           }
         }
@@ -237,39 +319,48 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
     }
   }
 
-  if (chain.gate !== undefined && typeof chain.gate !== "string") {
-    if (typeof chain.gate !== "object" || chain.gate === null || Array.isArray(chain.gate)) {
-      errors.push("gate: must be a shell-command string or a mapping");
+  if (chain.completion !== undefined) {
+    if (
+      typeof chain.completion !== "object" ||
+      chain.completion === null ||
+      Array.isArray(chain.completion)
+    ) {
+      errors.push("completion: must be a mapping");
     } else {
-      errors.push(...unknownKeys(chain.gate, GATE_KEYS, "gate"));
-      if (typeof chain.gate.run !== "string" || !chain.gate.run.trim())
-        errors.push("gate: run must be a non-empty shell command");
-      const repair = chain.gate.repair;
+      errors.push(...unknownKeys(chain.completion, COMPLETION_KEYS, "completion"));
+      if (typeof chain.completion.run !== "string" || !chain.completion.run.trim())
+        errors.push("completion: run must be a non-empty shell command");
+      if (!positiveInteger(chain.completion.attempts))
+        errors.push(
+          "completion: attempts must be a positive safe integer (total checks including the initial attempt)",
+        );
+      const repair = chain.completion.repair;
       if (repair !== undefined) {
         if (typeof repair !== "object" || repair === null || Array.isArray(repair)) {
-          errors.push("gate.repair: must be a mapping");
+          errors.push("completion.repair: must be a mapping");
         } else {
-          errors.push(...unknownKeys(repair, GATE_REPAIR_KEYS, "gate.repair"));
-          if (!repair.stages?.length) errors.push("gate.repair: stages must be a non-empty list");
+          errors.push(...unknownKeys(repair, COMPLETION_REPAIR_KEYS, "completion.repair"));
+          if (!repair.stages?.length)
+            errors.push("completion.repair: stages must be a non-empty list");
           else {
             for (const id of repair.stages) {
               if (!seen.has(id))
-                errors.push(`gate.repair: names stage "${id}", which does not exist`);
+                errors.push(`completion.repair: names stage "${id}", which does not exist`);
               const stage = stages.find((candidate) => candidate.id === id);
               if (stage?.produces)
                 errors.push(
-                  `gate.repair: stage "${id}" must not produce an artifact -- it runs only after a failed final gate`,
+                  `completion.repair: stage "${id}" must not produce an artifact -- it runs only after failed chain completion`,
                 );
               if ((chain.loop?.stages || []).includes(id))
-                errors.push(`gate.repair: stage "${id}" is also in the chain loop`);
+                errors.push(`completion.repair: stage "${id}" is also in the chain loop`);
               if ((chain.foreach?.stages || []).includes(id))
-                errors.push(`gate.repair: stage "${id}" is also in the foreach`);
+                errors.push(`completion.repair: stage "${id}" is also in the foreach`);
             }
           }
-          if (!positiveInteger(repair.max))
-            errors.push("gate.repair: max must be a positive safe integer (bound the retries)");
         }
       }
+      if (chain.completion.attempts > 1 && !repair?.stages?.length)
+        errors.push("completion: attempts > 1 requires repair.stages");
     }
   }
 
@@ -284,12 +375,104 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
   const loopIds = new Set(chain.loop?.stages || []);
   const fe = chain.foreach || null;
   const feIds = new Set(fe?.stages || []);
-  const gateRepairIds = new Set(
-    typeof chain.gate === "object" ? chain.gate.repair?.stages || [] : [],
-  );
+  const feLoopIds = new Set(fe?.loop?.stages || []);
+  const completionRepairIds = new Set(chain.completion?.repair?.stages || []);
+  const foreachRepairIds = new Set(fe?.completion?.repair?.stages || []);
   const available = new Set(Object.keys(chain.seeds || {}));
-  const loopProduces = stages.filter((s) => loopIds.has(s.id)).map((s) => s.produces);
-  const feProduces = stages.filter((s) => feIds.has(s.id)).map((s) => s.produces);
+  const loopProduces = stages.filter((s) => loopIds.has(s.id) && s.produces).map((s) => s.produces);
+  const feProduces = stages.filter((s) => feIds.has(s.id) && s.produces).map((s) => s.produces);
+  const allProduces = stages.filter((s) => s.produces).map((s) => s.produces);
+  const firstPassProducesBefore = new Map();
+  const firstPassProduces = [];
+  for (const id of fe?.stages || []) {
+    if (feLoopIds.has(id)) continue;
+    firstPassProducesBefore.set(id, [...firstPassProduces]);
+    const produced = stages.find((s) => s.id === id)?.produces;
+    if (produced) firstPassProduces.push(produced);
+  }
+
+  // SESSION REACHABILITY. Artifact flow and session flow are separate channels:
+  // a prompt may read an artifact from an outer scope, but a mutable CLI session
+  // may not be shared across foreach items.
+  const stageById = new Map(stages.map((s) => [s.id, s]));
+  for (const target of stages) {
+    if (typeof target.resumeFrom !== "string" || !target.resumeFrom.trim()) continue;
+    const source = stageById.get(target.resumeFrom);
+    if (!source) {
+      errors.push(`stage "${target.id}": resumeFrom names unknown stage "${target.resumeFrom}"`);
+      continue;
+    }
+    if (source.id === target.id) {
+      errors.push(`stage "${target.id}": resumeFrom cannot reference itself`);
+      continue;
+    }
+    if (source.run) {
+      errors.push(
+        `stage "${target.id}": resumeFrom source "${source.id}" is a run stage and has no model session`,
+      );
+      continue;
+    }
+    const sourceLocation = sessionLocation(chain, stages, source.id);
+    const targetLocation = sessionLocation(chain, stages, target.id);
+    if (!sourceLocation || !targetLocation) {
+      errors.push(
+        `stage "${target.id}": resumeFrom "${source.id}" has ambiguous execution topology`,
+      );
+      continue;
+    }
+    if (sourceLocation.scope !== targetLocation.scope) {
+      errors.push(
+        `stage "${target.id}": resumeFrom "${source.id}" crosses session scopes ` +
+          `(${sourceLocation.scope} -> ${targetLocation.scope}); top-level sessions and foreach-item sessions cannot be shared`,
+      );
+      continue;
+    }
+    if (!isStrictlyEarlier(sourceLocation, targetLocation)) {
+      errors.push(
+        `stage "${target.id}": resumeFrom "${source.id}" is not an earlier reachable invocation in the ${targetLocation.scope} scope`,
+      );
+      continue;
+    }
+    const sourceModel = source.model || chain.defaults?.model;
+    const targetModel = target.model || chain.defaults?.model;
+    const sourceProvider = providerFor(sourceModel);
+    const targetProvider = providerFor(targetModel);
+    if (sourceProvider.kind !== "cli" || targetProvider.kind !== "cli") {
+      errors.push(
+        `stage "${target.id}": resumeFrom requires session-capable CLI providers; ` +
+          `"${source.id}" uses ${sourceProvider.kind} and "${target.id}" uses ${targetProvider.kind}`,
+      );
+      continue;
+    }
+    if (sourceProvider.model !== targetProvider.model) {
+      errors.push(
+        `stage "${target.id}": resumeFrom "${source.id}" requires the same resolved model ` +
+          `(source "${sourceProvider.model}", target "${targetProvider.model}")`,
+      );
+    }
+  }
+
+  const visibleFor = (stage, { after = false } = {}) => {
+    const visible = new Set(available);
+    if (loopIds.has(stage.id)) for (const p of loopProduces) visible.add(p);
+    if (completionRepairIds.has(stage.id)) for (const p of allProduces) visible.add(p);
+    if (feIds.has(stage.id) || foreachRepairIds.has(stage.id)) {
+      // Declaration order is not execution order inside a foreach. Loop members do
+      // not run during the first pass, so a first-pass stage cannot read an artifact
+      // that only a loop member produces, even when that producer is declared above
+      // it. Loop members may read the whole foreach set because later rounds consume
+      // artifacts written by earlier rounds.
+      for (const p of feProduces) visible.delete(p);
+      const reachable =
+        feLoopIds.has(stage.id) || foreachRepairIds.has(stage.id)
+          ? feProduces
+          : firstPassProducesBefore.get(stage.id) || [];
+      for (const p of reachable) visible.add(p);
+      if (fe?.as) visible.add(fe.as);
+    }
+    if (after && stage.produces) visible.add(stage.produces);
+    return visible;
+  };
 
   // WHICH REFERENCES ARE NON-SCALAR, and therefore must never be interpolated into a
   // shell command.
@@ -337,12 +520,7 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
       }
     }
     if (body != null) {
-      const visible = new Set(available);
-      if (loopIds.has(s.id)) for (const p of loopProduces) visible.add(p);
-      if (feIds.has(s.id)) {
-        for (const p of feProduces) visible.add(p);
-        if (fe?.as) visible.add(fe.as);
-      }
+      const visible = visibleFor(s);
       for (const ref of placeholders(body)) {
         // Rooted, not literal: `{{chunk.files}}` is satisfied by whatever provides
         // `chunk`. Comparing the whole dotted string would make every field access
@@ -360,15 +538,27 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
           );
       }
     }
-    if (s.completion && typeof s.completion === "object" && typeof s.completion.run === "string") {
-      const visible = new Set(available);
-      if (loopIds.has(s.id)) for (const p of loopProduces) visible.add(p);
-      if (feIds.has(s.id)) {
-        for (const p of feProduces) visible.add(p);
-        if (fe?.as) visible.add(fe.as);
+    if (typeof s.resumePrompt === "string" && s.resumePrompt.trim()) {
+      let resumeBody = null;
+      try {
+        resumeBody = readPrompt(promptRoot, s.resumePrompt);
+      } catch {
+        errors.push(`stage "${s.id}": resumePrompt file not found: ${s.resumePrompt}`);
       }
-      // The postcondition runs after the stage has produced its artifact.
-      if (s.produces) visible.add(s.produces);
+      if (resumeBody != null) {
+        // A resume prompt runs only after this stage has already completed one
+        // invocation, so its own previously produced artifact is reachable.
+        const visible = visibleFor(s, { after: true });
+        for (const ref of placeholders(resumeBody))
+          if (!visible.has(rootOf(ref)))
+            errors.push(
+              `stage "${s.id}": resumePrompt references {{${ref}}}, which no earlier stage produces ` +
+                `(available: ${[...visible].sort().join(", ") || "none"})`,
+            );
+      }
+    }
+    if (s.completion && typeof s.completion === "object" && typeof s.completion.run === "string") {
+      const visible = visibleFor(s, { after: true });
       for (const ref of placeholders(s.completion.run)) {
         if (!visible.has(rootOf(ref)))
           errors.push(
@@ -452,16 +642,67 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
         );
     }
 
-    // The per-chunk gate is a COMMAND TEMPLATE. It is optional in the kernel, but a
-    // foreach with no gate has no objective signal per element -- the inner loop is
-    // then graded only by a model's opinion of its own work.
-    if (fe.gate !== undefined && typeof fe.gate !== "string")
-      errors.push("foreach: gate must be a string (a shell command, may use {{...}})");
-    if (typeof fe.gate === "string") {
-      for (const ref of placeholders(fe.gate)) {
+    if (fe.completion !== undefined) {
+      if (
+        typeof fe.completion !== "object" ||
+        fe.completion === null ||
+        Array.isArray(fe.completion)
+      ) {
+        errors.push("foreach.completion: must be a mapping");
+      } else {
+        errors.push(...unknownKeys(fe.completion, COMPLETION_KEYS, "foreach.completion"));
+        if (typeof fe.completion.run !== "string" || !fe.completion.run.trim())
+          errors.push("foreach.completion: run must be a non-empty shell command");
+        if (!positiveInteger(fe.completion.attempts))
+          errors.push(
+            "foreach.completion: attempts must be a positive safe integer (total checks including the initial attempt)",
+          );
+        const repair = fe.completion.repair;
+        if (repair !== undefined) {
+          if (typeof repair !== "object" || repair === null || Array.isArray(repair)) {
+            errors.push("foreach.completion.repair: must be a mapping");
+          } else {
+            errors.push(
+              ...unknownKeys(repair, COMPLETION_REPAIR_KEYS, "foreach.completion.repair"),
+            );
+            if (!repair.stages?.length)
+              errors.push("foreach.completion.repair: stages must be a non-empty list");
+            for (const id of repair.stages || []) {
+              if (!seen.has(id))
+                errors.push(`foreach.completion.repair: names stage "${id}", which does not exist`);
+              const stage = stages.find((candidate) => candidate.id === id);
+              if (stage?.produces)
+                errors.push(
+                  `foreach.completion.repair: stage "${id}" must not produce an artifact -- it runs only after failed item completion`,
+                );
+              if (feIds.has(id))
+                errors.push(
+                  `foreach.completion.repair: stage "${id}" is also an ordinary foreach stage`,
+                );
+              if (loopIds.has(id))
+                errors.push(
+                  `foreach.completion.repair: stage "${id}" is also in the chain-level loop`,
+                );
+              if (completionRepairIds.has(id))
+                errors.push(
+                  `foreach.completion.repair: stage "${id}" is also a chain completion repair stage`,
+                );
+            }
+          }
+        }
+        if (fe.completion.attempts > 1 && !repair?.stages?.length)
+          errors.push("foreach.completion: attempts > 1 requires repair.stages");
+      }
+    }
+    if (typeof fe.completion?.run === "string") {
+      for (const ref of placeholders(fe.completion.run)) {
         const r = rootOf(ref);
         if (r !== fe.as && !available.has(r))
-          errors.push(`foreach: gate references {{${ref}}}, which nothing produces`);
+          errors.push(`foreach.completion: run references {{${ref}}}, which nothing produces`);
+        else if (nonScalar.has(ref))
+          errors.push(
+            `foreach.completion: run interpolates {{${ref}}}, which is structured (not a scalar)`,
+          );
       }
     }
 
@@ -479,6 +720,15 @@ function validateChain(chain, { promptRoot, readPrompt = defaultReadPrompt } = {
                 `which is not one of ${[...EXPECT_TYPES].join(", ")}`,
             );
       }
+    }
+  }
+
+  if (typeof chain.completion?.run === "string") {
+    for (const ref of placeholders(chain.completion.run)) {
+      if (!available.has(rootOf(ref)))
+        errors.push(`completion: run references {{${ref}}}, which nothing produces`);
+      else if (nonScalar.has(ref))
+        errors.push(`completion: run interpolates {{${ref}}}, which is structured (not a scalar)`);
     }
   }
 
@@ -663,6 +913,8 @@ export function resolveStages(chain) {
     return {
       ...common,
       prompt: s.prompt,
+      resumePrompt: s.resumePrompt || null,
+      resumeFrom: s.resumeFrom || null,
       model: s.model || d.model,
       effort: s.effort || d.effort || "high",
       tools: s.tools ?? d.tools ?? false,
@@ -701,10 +953,14 @@ export function selfTest() {
     "bad.md": "use {{nothing}}",
     "loop.md": "use {{verdict}}",
     "fe-code.md": "build {{chunk}} per {{plan}}",
+    "item.md": "use {{chunk}}",
     "fe-review.md": "judge {{chunk.files}}",
+    "fe-facts-review.md": "judge {{facts}}",
     "fe-fix.md": "fix per {{verdict}}",
     "fe-fix-field.md": "fix per {{verdict.findings}}",
     "asks.md": "read {{spec}} and answer with pass (boolean) and findings (array)",
+    "resume.md": "continue {{spec}}",
+    "resume-bad.md": "continue {{nothing}}",
   };
   const readPrompt = (_root, rel) => {
     if (!(rel in prompts)) throw new Error("missing");
@@ -751,75 +1007,253 @@ export function selfTest() {
     ],
   };
   const V = (c) => validateChain(c, { readPrompt });
-
-  CASES.push(["a well-formed chain validates clean", V(base).length === 0]);
   CASES.push([
-    "a legacy string gate remains valid",
-    V({ ...base, gate: "pnpm check" }).length === 0,
-  ]);
-  CASES.push([
-    "a repairable final gate validates",
+    "resumePrompt is valid on a resumed model stage",
     V({
       ...base,
-      stages: [...base.stages, { id: "integration-fix", prompt: "a.md" }],
-      gate: { run: "pnpm check", repair: { stages: ["integration-fix"], max: 2 } },
+      stages: [{ id: "plan", prompt: "a.md", resume: true, resumePrompt: "resume.md" }],
     }).length === 0,
   ]);
   CASES.push([
-    "a repairable gate requires a bounded retry count",
+    "resumePrompt requires a continuation mode",
     V({
       ...base,
-      gate: { run: "pnpm check", repair: { stages: ["code"] } },
-    }).some((e) => e.includes("bound the retries")),
+      stages: [{ id: "plan", prompt: "a.md", resumePrompt: "resume.md" }],
+    }).some((e) => e.includes("requires resume: true or resumeFrom")),
   ]);
   CASES.push([
-    "a repairable gate must name real stages",
+    "resumePrompt must be a prompt file path",
     V({
       ...base,
-      gate: { run: "pnpm check", repair: { stages: ["missing"], max: 2 } },
-    }).some((e) => e.includes('stage "missing"')),
+      stages: [{ id: "plan", prompt: "a.md", resume: true, resumePrompt: 7 }],
+    }).some((e) => e.includes("resumePrompt must be")),
   ]);
   CASES.push([
-    "a final-gate repair stage cannot produce an artifact",
+    "a missing resumePrompt file is rejected",
     V({
       ...base,
-      gate: { run: "pnpm check", repair: { stages: ["code"], max: 2 } },
-    }).some((e) => e.includes("must not produce an artifact")),
+      stages: [{ id: "plan", prompt: "a.md", resume: true, resumePrompt: "gone.md" }],
+    }).some((e) => e.includes("resumePrompt file not found")),
   ]);
   CASES.push([
-    "a repairable gate rejects an unsafe retry bound",
+    "resumePrompt placeholders obey stage reachability",
+    V({
+      ...base,
+      stages: [{ id: "plan", prompt: "a.md", resume: true, resumePrompt: "resume-bad.md" }],
+    }).some((e) => e.includes("resumePrompt references {{nothing}}")),
+  ]);
+  CASES.push([
+    "resumePrompt survives stage resolution",
+    resolveStages({
+      defaults: { model: "m" },
+      stages: [{ id: "plan", prompt: "a.md", resume: true, resumePrompt: "resume.md" }],
+    })[0].resumePrompt === "resume.md",
+  ]);
+  const crossStage = (stages, extra = {}) =>
+    V({
+      seeds: { spec: "" },
+      defaults: { model: "m" },
+      stages,
+      ...extra,
+    });
+  CASES.push([
+    "resumeFrom accepts an earlier compatible model stage",
+    crossStage([
+      { id: "plan", prompt: "a.md" },
+      { id: "fix", prompt: "a.md", resumeFrom: "plan" },
+    ]).length === 0,
+  ]);
+  CASES.push([
+    "resumeFrom survives stage resolution",
+    resolveStages({
+      defaults: { model: "m" },
+      stages: [
+        { id: "plan", prompt: "a.md" },
+        { id: "fix", prompt: "a.md", resumeFrom: "plan" },
+      ],
+    })[1].resumeFrom === "plan",
+  ]);
+  CASES.push([
+    "resumePrompt is valid with resumeFrom",
+    crossStage([
+      { id: "plan", prompt: "a.md" },
+      { id: "fix", prompt: "a.md", resumeFrom: "plan", resumePrompt: "resume.md" },
+    ]).length === 0,
+  ]);
+  CASES.push([
+    "resume and resumeFrom are rejected together",
+    crossStage([
+      { id: "plan", prompt: "a.md" },
+      { id: "fix", prompt: "a.md", resume: true, resumeFrom: "plan" },
+    ]).some((e) => e.includes("cannot be combined")),
+  ]);
+  CASES.push([
+    "resumeFrom rejects an empty reference",
+    crossStage([{ id: "fix", prompt: "a.md", resumeFrom: " " }]).some((e) =>
+      e.includes("non-empty earlier stage id"),
+    ),
+  ]);
+  CASES.push([
+    "resumeFrom rejects an unknown stage",
+    crossStage([{ id: "fix", prompt: "a.md", resumeFrom: "missing" }]).some((e) =>
+      e.includes("unknown stage"),
+    ),
+  ]);
+  CASES.push([
+    "resumeFrom rejects self references",
+    crossStage([{ id: "fix", prompt: "a.md", resumeFrom: "fix" }]).some((e) =>
+      e.includes("cannot reference itself"),
+    ),
+  ]);
+  CASES.push([
+    "resumeFrom rejects a future stage",
+    crossStage([
+      { id: "fix", prompt: "a.md", resumeFrom: "plan" },
+      { id: "plan", prompt: "a.md" },
+    ]).some((e) => e.includes("not an earlier reachable invocation")),
+  ]);
+  CASES.push([
+    "resumeFrom rejects a command source",
+    crossStage([
+      { id: "facts", run: "echo facts" },
+      { id: "fix", prompt: "a.md", resumeFrom: "facts" },
+    ]).some((e) => e.includes("run stage")),
+  ]);
+  CASES.push([
+    "resumeFrom rejects different models",
+    crossStage([
+      { id: "plan", prompt: "a.md", model: "m-one" },
+      { id: "fix", prompt: "a.md", model: "m-two", resumeFrom: "plan" },
+    ]).some((e) => e.includes("same resolved model")),
+  ]);
+  CASES.push([
+    "resumeFrom rejects unsupported providers",
+    crossStage([
+      { id: "plan", prompt: "a.md", model: "azure:deepseek" },
+      { id: "fix", prompt: "a.md", model: "azure:deepseek", resumeFrom: "plan" },
+    ]).some((e) => e.includes("session-capable CLI providers")),
+  ]);
+  CASES.push([
+    "a foreach target cannot resume a top-level session",
+    crossStage(
+      [
+        { id: "plan", prompt: "a.md", produces: "items", parse: "json" },
+        { id: "fix", prompt: "item.md", resumeFrom: "plan" },
+      ],
+      {
+        foreach: { over: "items", as: "chunk", stages: ["fix"], max: 2 },
+      },
+    ).some((e) => e.includes("crosses session scopes")),
+  ]);
+  CASES.push([
+    "same-item foreach continuation is valid",
+    crossStage(
+      [
+        { id: "plan", prompt: "a.md", produces: "items", parse: "json" },
+        { id: "code", prompt: "item.md" },
+        { id: "fix", prompt: "item.md", resumeFrom: "code" },
+      ],
+      {
+        foreach: { over: "items", as: "chunk", stages: ["code", "fix"], max: 2 },
+      },
+    ).length === 0,
+  ]);
+  CASES.push([
+    "a later inner-loop source is rejected for the target's first round",
+    crossStage(
+      [
+        { id: "plan", prompt: "a.md", produces: "items", parse: "json" },
+        { id: "fix", prompt: "item.md", resumeFrom: "review" },
+        { id: "review", prompt: "item.md", produces: "verdict" },
+      ],
+      {
+        foreach: {
+          over: "items",
+          as: "chunk",
+          stages: ["fix", "review"],
+          loop: { stages: ["fix", "review"], until: "verdict.pass", max: 2 },
+          max: 2,
+        },
+      },
+    ).some((e) => e.includes("not an earlier reachable invocation")),
+  ]);
+  CASES.push(["a well-formed chain validates clean", V(base).length === 0]);
+  CASES.push([
+    "legacy top-level gate authoring is rejected",
+    V({ ...base, gate: "pnpm check" }).some((e) => e.includes('unknown key "gate"')),
+  ]);
+  CASES.push([
+    "a repairable chain completion validates",
     V({
       ...base,
       stages: [...base.stages, { id: "integration-fix", prompt: "a.md" }],
-      gate: {
+      completion: {
         run: "pnpm check",
-        repair: { stages: ["integration-fix"], max: Number.POSITIVE_INFINITY },
+        attempts: 2,
+        repair: { stages: ["integration-fix"] },
+      },
+    }).length === 0,
+  ]);
+  CASES.push([
+    "composite retries require repair stages",
+    V({
+      ...base,
+      completion: { run: "pnpm check", attempts: 2 },
+    }).some((e) => e.includes("requires repair.stages")),
+  ]);
+  CASES.push([
+    "a repairable completion must name real stages",
+    V({
+      ...base,
+      completion: { run: "pnpm check", attempts: 2, repair: { stages: ["missing"] } },
+    }).some((e) => e.includes('stage "missing"')),
+  ]);
+  CASES.push([
+    "a chain completion repair stage cannot produce an artifact",
+    V({
+      ...base,
+      completion: { run: "pnpm check", attempts: 2, repair: { stages: ["code"] } },
+    }).some((e) => e.includes("must not produce an artifact")),
+  ]);
+  CASES.push([
+    "a completion rejects an unsafe attempt bound",
+    V({
+      ...base,
+      stages: [...base.stages, { id: "integration-fix", prompt: "a.md" }],
+      completion: {
+        run: "pnpm check",
+        attempts: Number.POSITIVE_INFINITY,
+        repair: { stages: ["integration-fix"] },
       },
     }).some((e) => e.includes("positive safe integer")),
   ]);
   CASES.push([
-    "an explicit preflight command validates",
-    V({ ...base, preflight: { run: 'test -z "$(git status --porcelain)"' } }).length === 0,
+    "an explicit requires command validates",
+    V({ ...base, requires: { run: "test -d .git" } }).length === 0,
   ]);
   CASES.push([
-    "preflight may interpolate a scalar literal seed",
+    "requires may interpolate a scalar literal seed",
     V({
       ...base,
       seeds: { spec: "", branch: "main" },
-      preflight: { run: "test {{branch}} = main" },
+      requires: { run: "test {{branch}} = main" },
     }).length === 0,
   ]);
   CASES.push([
-    "preflight cannot interpolate a file-backed seed",
-    V({ ...base, seeds: { spec: "@spec.md" }, preflight: { run: "test -n {{spec}}" } }).some((e) =>
+    "requires cannot interpolate a file-backed seed",
+    V({ ...base, seeds: { spec: "@spec.md" }, requires: { run: "test -n {{spec}}" } }).some((e) =>
       e.includes("not a scalar literal seed"),
     ),
   ]);
   CASES.push([
-    "preflight cannot reference a field on a scalar seed",
-    V({ ...base, seeds: { spec: "" }, preflight: { run: "test -n {{spec.path}}" } }).some((e) =>
+    "requires cannot reference a field on a scalar seed",
+    V({ ...base, seeds: { spec: "" }, requires: { run: "test -n {{spec.path}}" } }).some((e) =>
       e.includes("field {{spec.path}}"),
     ),
+  ]);
+  CASES.push([
+    "legacy preflight authoring is rejected",
+    V({ ...base, preflight: { run: "true" } }).some((e) => e.includes('unknown key "preflight"')),
   ]);
 
   // "Nothing is fixed" only holds if an omission is caught rather than absorbed.
@@ -913,13 +1347,13 @@ export function selfTest() {
   });
   CASES.push([
     "a bounded completion command is valid",
-    V(withCompletion({ run: "pnpm check", max: 3 })).length === 0,
+    V(withCompletion({ run: "pnpm check", attempts: 3 })).length === 0,
   ]);
   CASES.push([
     "completion is rejected on a command stage because no agent can resume",
     V({
       ...base,
-      stages: [{ id: "fmt", run: "pnpm format", completion: { run: "pnpm check", max: 2 } }],
+      stages: [{ id: "fmt", run: "pnpm format", completion: { run: "pnpm check", attempts: 2 } }],
     }).some((e) => e.includes("no agent session to resume")),
   ]);
   CASES.push([
@@ -928,39 +1362,40 @@ export function selfTest() {
   ]);
   CASES.push([
     "completion requires a non-empty command",
-    V(withCompletion({ run: "", max: 2 })).some((e) => e.includes("non-empty shell command")),
+    V(withCompletion({ run: "", attempts: 2 })).some((e) => e.includes("non-empty shell command")),
   ]);
   CASES.push([
-    "completion retries must be bounded",
-    V(withCompletion({ run: "pnpm check" })).some((e) => e.includes("bound the retries")),
+    "completion attempts must be bounded",
+    V(withCompletion({ run: "pnpm check" })).some((e) => e.includes("attempts must be a positive")),
   ]);
   for (const badMax of [1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
     CASES.push([
       `completion rejects non-safe bound ${badMax}`,
-      V(withCompletion({ run: "pnpm check", max: badMax })).some((e) =>
+      V(withCompletion({ run: "pnpm check", attempts: badMax })).some((e) =>
         e.includes("positive safe integer"),
       ),
     ]);
   }
   CASES.push([
     "completion rejects unknown keys",
-    V(withCompletion({ run: "pnpm check", max: 2, retries: 2 })).some((e) =>
+    V(withCompletion({ run: "pnpm check", attempts: 2, retries: 2 })).some((e) =>
       e.includes('unknown key "retries"'),
     ),
   ]);
   CASES.push([
     "completion may reference the stage artifact it checks",
-    V(withCompletion({ run: "node check.mjs plan", max: 2 })).length === 0,
+    V(withCompletion({ run: "node check.mjs plan", attempts: 2 })).length === 0,
   ]);
   CASES.push([
     "completion refuses an unavailable artifact",
-    V(withCompletion({ run: "node check.mjs {{missing}}", max: 2 })).some((e) =>
+    V(withCompletion({ run: "node check.mjs {{missing}}", attempts: 2 })).some((e) =>
       e.includes("unavailable after the stage"),
     ),
   ]);
   CASES.push([
     "resolved stages retain completion configuration",
-    resolveStages(withCompletion({ run: "pnpm check", max: 2 })).at(0).completion?.max === 2,
+    resolveStages(withCompletion({ run: "pnpm check", attempts: 2 })).at(0).completion?.attempts ===
+      2,
   ]);
   // A command is rendered like a prompt, so it gets the same static reachability
   // check -- knowable before the run, so it must not cost one to discover.
@@ -1288,7 +1723,7 @@ export function selfTest() {
       as: "chunk",
       stages: ["code", "review", "fix"],
       loop: { stages: ["review", "fix"], until: "verdict.pass", max: 3 },
-      gate: "{{chunk.acceptance}}",
+      completion: { run: "{{chunk.acceptance}}", attempts: 1 },
       expects: { id: "string", files: "array", acceptance: "string" },
       max: 20,
     },
@@ -1341,6 +1776,34 @@ export function selfTest() {
     ),
   ]);
   CASES.push([
+    "a first-pass stage cannot read an artifact produced only inside the inner loop",
+    V({
+      ...feChain,
+      stages: [
+        feChain.stages[0],
+        feChain.stages[1],
+        { id: "facts", run: "echo '{}'", parse: "json", produces: "facts" },
+        {
+          id: "review",
+          prompt: "fe-facts-review.md",
+          produces: "verdict",
+          parse: "json",
+        },
+        feChain.stages[3],
+      ],
+      foreach: {
+        ...feChain.foreach,
+        stages: ["code", "facts", "review", "fix"],
+        loop: { stages: ["facts", "fix"], until: "verdict.pass", max: 3 },
+      },
+    }).some(
+      (e) =>
+        e.includes('stage "review"') &&
+        e.includes("{{facts}}") &&
+        e.includes("no earlier stage produces"),
+    ),
+  ]);
+  CASES.push([
     "an inner loop until that no foreach stage produces is an error",
     FE({ loop: { stages: ["review"], until: "plan.pass", max: 2 } }).some((e) =>
       e.includes("no foreach stage produces"),
@@ -1359,12 +1822,14 @@ export function selfTest() {
     ),
   ]);
   CASES.push([
-    "a gate referencing something nothing provides is an error",
-    FE({ gate: "{{ghost.cmd}}" }).some((e) => e.includes("gate references")),
+    "foreach completion referencing something nothing provides is an error",
+    FE({ completion: { run: "{{ghost.cmd}}", attempts: 1 } }).some((e) =>
+      e.includes("completion: run references"),
+    ),
   ]);
   CASES.push([
-    "a gate may reference the bound element",
-    FE({ gate: "run {{chunk.acceptance}}" }).length === 0,
+    "foreach completion may reference the bound element",
+    FE({ completion: { run: "run {{chunk.acceptance}}", attempts: 1 } }).length === 0,
   ]);
   CASES.push([
     "foreach expects must name real types",
@@ -1378,8 +1843,8 @@ export function selfTest() {
     }).some((e) => e.includes("also in the chain-level loop")),
   ]);
   CASES.push([
-    "a foreach with no gate still validates (the kernel does not require one)",
-    V({ ...feChain, foreach: { ...feChain.foreach, gate: undefined } }).length === 0,
+    "a foreach with no completion still validates",
+    V({ ...feChain, foreach: { ...feChain.foreach, completion: undefined } }).length === 0,
   ]);
   CASES.push([
     "onExhausted on a FOREACH loop is rejected — it means nothing where a gate follows",

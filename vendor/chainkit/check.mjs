@@ -130,6 +130,8 @@ function checkChainRoot(root) {
       problems.push(`${f}: ${w}`);
     for (const s of loaded.chain.stages || [])
       if (s.prompt) used.add(path.resolve(loaded.promptRoot, s.prompt));
+    for (const s of loaded.chain.stages || [])
+      if (s.resumePrompt) used.add(path.resolve(loaded.promptRoot, s.resumePrompt));
     // A seed of the form `@path` reads a file: a supporting doc -- a coding
     // standard, a review rubric -- kept beside the chain instead of pasted into
     // it. Those count as referenced for the same reason prompts do.
@@ -194,6 +196,18 @@ const steps = [
     name: "selftest:completion",
     cmd: "node",
     args: [path.join(here, "completion.selftest.mjs")],
+    cwd: here,
+  },
+  {
+    name: "selftest:resume",
+    cmd: "node",
+    args: [path.join(here, "resume.selftest.mjs")],
+    cwd: here,
+  },
+  {
+    name: "selftest:vendor",
+    cmd: "node",
+    args: [path.join(here, "vendor.selftest.mjs")],
     cwd: here,
   },
   ...canvases.map((f) => ({

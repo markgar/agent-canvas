@@ -229,15 +229,15 @@ export function sliceSpec(spec: FeatureSpec, references: string[]): string {
 export function validatePlan(value: unknown, spec: FeatureSpec): Plan {
   const plan = planSchema.parse(value);
   const ids = new Set<string>();
-  const files = new Set<string>();
   const coverage = new Set<string>();
   const checks = new Set<string>();
   for (const chunk of plan.chunks) {
     if (ids.has(chunk.id)) throw new Error(`Duplicate chunk ID: ${chunk.id}`);
     ids.add(chunk.id);
+    const files = new Set<string>();
     for (const file of chunk.files) {
       validateOwnedPath(file);
-      if (files.has(file)) throw new Error(`File ownership overlaps: ${file}`);
+      if (files.has(file)) throw new Error(`Duplicate file in chunk: ${file}`);
       files.add(file);
     }
     sliceSpec(spec, chunk.specRefs);

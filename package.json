@@ -6,14 +6,14 @@
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
-    "node": "^22.14.0 || ^24.0.0",
+    "node": ">=22.14.0 <23",
     "npm": ">=10"
   },
   "scripts": {
     "dev": "tsx watch src/server/main.ts",
-    "build": "tsc --project tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "start": "node dist/server/main.js",
-    "typecheck": "tsc --noEmit && tsc --project tsconfig.contracts.json",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.server.json && tsc --project tsconfig.client.json && tsc --project tsconfig.contracts.json",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -24,18 +24,26 @@
     "chainkit:run": "tsx .chainkit/scripts/cli.ts run",
     "chainkit:vendor": "tsx .chainkit/scripts/vendor.ts",
     "chainkit:selftest": "node vendor/chainkit/selftest.mjs && node vendor/chainkit/completion.selftest.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run chainkit:validate && npm run test:coverage && npm run build"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run chainkit:validate && npm run build && npm run test:coverage",
+    "browser:install": "PLAYWRIGHT_SKIP_BROWSER_GC=1 playwright install chromium"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "css-tree": "3.2.1",
     "fastify": "^5.12.1",
+    "sanitize-html": "2.17.7",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@types/css-tree": "3.2.0",
     "@types/node": "^22.0.0",
+    "@types/sanitize-html": "2.16.1",
     "@vitest/coverage-v8": "4.0.18",
+    "esbuild": "0.28.2",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.0.0",
+    "playwright": "1.63.0",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0",
     "typescript": "~5.9.0",

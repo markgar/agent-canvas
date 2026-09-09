@@ -12,16 +12,17 @@
 
 {{chunkSpec}}
 
-## Current verdict and measured failures
+## Independent review and measured facts
 
-{{verdict}}
+{{review}}
 
 {{facts}}
 
-Address the observed failures without weakening checks, changing approved behavior,
-editing outside owned files, or performing Git operations. If the correct remedy
-requires changing the spec, policy, or plan, report the blocker rather than inventing
-authority. New regressions remain reviewable; the findings list is not a permission
-to break other behavior. At most two repair turns run for this chunk.
+Apply every concrete review remedy and correct every measured failure in one focused
+pass without weakening checks, changing approved behavior, editing outside owned
+files, or performing Git operations. Preserve sound code and avoid unrelated cleanup.
+If the review passed and all measured checks passed, make no changes. If a correct
+remedy requires changing the spec, policy, or plan, report that blocker rather than
+inventing authority.
 
 Return repairNotes describing corrections, checks run, and any unresolved blocker.

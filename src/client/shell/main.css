@@ -1,0 +1,137 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+}
+
+.shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.shell__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+}
+
+.shell__eyebrow {
+  margin: 0 0 0.2rem;
+  color: GrayText;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 1.15rem;
+}
+
+.status {
+  margin: 0;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border-radius: 999px;
+  color: GrayText;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status[data-state='connected'] {
+  color: #18794e;
+}
+
+.status[data-state='reconnecting'] {
+  color: #9a6700;
+}
+
+.status[data-state='disconnected'] {
+  color: #cf222e;
+}
+
+.empty-state {
+  align-self: center;
+  justify-self: center;
+  max-width: 32rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.empty-state h2 {
+  margin-bottom: 0.5rem;
+  font-size: 1.35rem;
+}
+
+.empty-state p {
+  margin-bottom: 0;
+  color: GrayText;
+  line-height: 1.5;
+}
+
+.content-region {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.content-region h2 {
+  grid-row: 1;
+  margin-bottom: 0.75rem;
+  overflow-wrap: anywhere;
+  font-size: 1.1rem;
+}
+
+.content-region > p {
+  grid-row: 2;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #bf8700;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, #fff8c5 80%, Canvas);
+  color: CanvasText;
+  font-weight: 600;
+}
+
+.content-frame {
+  grid-row: 3;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 0.5rem;
+  background: Canvas;
+}
+
+.content-region[data-stale='true'] .content-frame {
+  opacity: 0.72;
+}

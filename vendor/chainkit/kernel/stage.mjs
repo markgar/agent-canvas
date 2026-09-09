@@ -23,8 +23,189 @@
 import path from "node:path";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { complete, lastErrorLine } from "./providers.mjs";
+import { complete, lastErrorLine, providerFor } from "./providers.mjs";
 import { render, readPath } from "./context.mjs";
+import { makeSessionLedger, selectSession } from "./session.mjs";
+
+const COMMAND_PREVIEW_CHARS = 4000;
+const OUTPUT_PREVIEW_CHARS = 12000;
+const JSON_PREVIEW_BUDGET = 10000;
+
+function textPreview(value, { tail = false } = {}) {
+  const text = String(value || "");
+  const truncated = text.length > OUTPUT_PREVIEW_CHARS;
+  const preview = truncated
+    ? tail
+      ? text.slice(-OUTPUT_PREVIEW_CHARS)
+      : text.slice(0, OUTPUT_PREVIEW_CHARS)
+    : text;
+  return {
+    preview,
+    truncated,
+    bytes: Buffer.byteLength(text),
+    characters: text.length,
+    lines: text ? text.split(/\r?\n/).length : 0,
+  };
+}
+
+function commandPreview(command) {
+  const text = String(command || "");
+  return {
+    text: text.slice(0, COMMAND_PREVIEW_CHARS),
+    characters: text.length,
+    truncated: text.length > COMMAND_PREVIEW_CHARS,
+  };
+}
+
+function valueShape(value) {
+  if (value === null) return { type: "null" };
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      elementTypes: [
+        ...new Set(
+          value.slice(0, 100).map((item) => {
+            if (item === null) return "null";
+            if (Array.isArray(item)) return "array";
+            return typeof item;
+          }),
+        ),
+      ],
+    };
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value);
+    return {
+      type: "object",
+      keyCount: keys.length,
+      keys: keys.slice(0, 100).map((key) => key.slice(0, 200)),
+      keysTruncated: keys.length > 100,
+    };
+  }
+  return { type: typeof value };
+}
+
+function jsonPreview(value) {
+  let remaining = JSON_PREVIEW_BUDGET;
+  let nodes = 0;
+  let truncated = false;
+  const fitString = (item) => {
+    let low = 0;
+    let high = Math.min(item.length, 2000);
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      const candidate = item.slice(0, mid) + (mid < item.length ? "…" : "");
+      if (JSON.stringify(candidate).length <= remaining) low = mid;
+      else high = mid - 1;
+    }
+    const candidate = item.slice(0, low) + (low < item.length ? "…" : "");
+    remaining -= JSON.stringify(candidate).length;
+    if (low < item.length) truncated = true;
+    return candidate;
+  };
+  const walk = (item, depth = 0) => {
+    nodes += 1;
+    if (nodes > 200 || remaining <= 0) {
+      truncated = true;
+      return "…";
+    }
+    if (depth > 6) {
+      truncated = true;
+      remaining -= 3;
+      return "…";
+    }
+    if (item === null || typeof item === "number" || typeof item === "boolean") {
+      remaining -= JSON.stringify(item).length;
+      return item;
+    }
+    if (typeof item === "string") return fitString(item);
+    if (Array.isArray(item)) {
+      remaining -= 2;
+      const out = [];
+      for (const child of item) {
+        if (remaining <= 4 || out.length >= 100 || nodes >= 200) {
+          truncated = true;
+          break;
+        }
+        if (out.length) remaining -= 1;
+        out.push(walk(child, depth + 1));
+      }
+      return out;
+    }
+    if (item && typeof item === "object") {
+      remaining -= 2;
+      const out = {};
+      for (const [key, child] of Object.entries(item)) {
+        if (remaining <= 8 || Object.keys(out).length >= 100 || nodes >= 200) {
+          truncated = true;
+          break;
+        }
+        const safeKey = key.slice(0, 200);
+        if (safeKey !== key) truncated = true;
+        remaining -= JSON.stringify(safeKey).length + 1;
+        if (Object.keys(out).length) remaining -= 1;
+        out[safeKey] = walk(child, depth + 1);
+      }
+      return out;
+    }
+    const text = String(item);
+    remaining -= text.length;
+    return text;
+  };
+  const preview = walk(value);
+  const serialized = JSON.stringify(preview);
+  if (serialized.length <= JSON_PREVIEW_BUDGET) return { preview, truncated };
+  return {
+    preview: {
+      type: valueShape(value).type,
+      notice: "structural preview exceeded the telemetry bound",
+    },
+    truncated: true,
+  };
+}
+
+function artifactTelemetry(stage, value, stdout, state) {
+  if (!stage.produces) return null;
+  if (value === undefined)
+    return {
+      name: stage.produces,
+      parse: stage.parse || "text",
+      state: "declared",
+    };
+  // JSON can be valid at a depth where re-serialising it recursively overflows the
+  // JS stack. The command's stdout is already the exact bounded source evidence; use
+  // it for size metrics and keep the parsed value only for the depth-bounded preview.
+  const raw = stage.parse === "json" ? stdout.trim() : String(value);
+  const facts = {
+    name: stage.produces,
+    parse: stage.parse || "text",
+    state,
+    shape: valueShape(value),
+    bytes: Buffer.byteLength(raw),
+    characters: raw.length,
+    lines: raw ? raw.split(/\r?\n/).length : 0,
+    sourceBytes: Buffer.byteLength(stdout),
+    sourceCharacters: stdout.length,
+    sourceLines: stdout ? stdout.split(/\r?\n/).length : 0,
+  };
+  if (stage.parse === "json") return { ...facts, ...jsonPreview(value) };
+  return { ...facts, ...textPreview(value) };
+}
+
+function renderCompletionPreview(template, ctx, produced) {
+  if (!produced) return render(template, ctx);
+  const deferred = [];
+  const masked = template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (match, name) => {
+    if (String(name).split(".")[0] !== produced) return match;
+    const token = `__CHAINKIT_DEFERRED_COMPLETION_${deferred.length}__`;
+    deferred.push({ token, match });
+    return token;
+  });
+  let preview = render(masked, ctx);
+  for (const { token, match } of deferred) preview = preview.replaceAll(token, match);
+  return preview;
+}
 
 // Pull a JSON object out of a model's prose. Models reliably wrap JSON in fences or
 // preface it with a sentence, and treating that as a parse failure would throw away
@@ -223,7 +404,7 @@ function composeStagePrompt(
         `\`${completionCommand}\``,
         "",
         "Run it yourself and fix every failure before returning. Chainkit will run it independently",
-        `after your turn and resume this stage if it is still red (maximum ${stage.completion.max} attempt(s)).`,
+        `after your turn and resume this stage if it is still red (${stage.completion.attempts} total attempt(s), including this one).`,
       ].join("\n")
     : "";
   const failedCheck = deterministicFailure
@@ -236,8 +417,8 @@ function composeStagePrompt(
         "Repair the repository, run the check yourself, and do not return until it passes.",
         "",
         `Command: \`${deterministicFailure.command}\``,
-        deterministicFailure.attempt && deterministicFailure.max
-          ? `Attempt: ${deterministicFailure.attempt}/${deterministicFailure.max}`
+        deterministicFailure.attempt && (deterministicFailure.attempts || deterministicFailure.max)
+          ? `Attempt: ${deterministicFailure.attempt}/${deterministicFailure.attempts || deterministicFailure.max}`
           : "",
         "",
         "```text",
@@ -246,6 +427,61 @@ function composeStagePrompt(
       ].join("\n")
     : "";
   return appendAppealNote(`${renderedTemplate}${completionRequirement}${failedCheck}`, stage);
+}
+
+function completionContinuation(stage, failure, command) {
+  const attempts = failure.attempts || failure.max || stage.completion?.attempts;
+  return [
+    "Continue the same task in this existing conversation.",
+    "",
+    failure.context || "Your previous answer did not satisfy the deterministic completion check.",
+    `The exact frozen command is: \`${command}\``,
+    `This is attempt ${failure.attempt}/${attempts}.`,
+    "",
+    "Bounded captured failure output:",
+    "```text",
+    failure.output || failure.tail || failure.error || "(no output captured)",
+    "```",
+    "",
+    "Do not repeat repository discovery already completed in this conversation.",
+    "Repair the failure, run the exact command yourself, and return the complete replacement answer",
+    "in the original requested format rather than a patch, addendum, or partial continuation.",
+  ].join("\n");
+}
+
+function selectStagePrompt({
+  stage,
+  initialTemplate,
+  resumeTemplate = null,
+  ctx,
+  deterministicFailure = null,
+  completionCommand = stage.completion?.run,
+  continued = false,
+  crossStageAdoption = false,
+  attempt = 0,
+}) {
+  if (continued && deterministicFailure) {
+    return {
+      prompt: completionContinuation(
+        stage,
+        deterministicFailure,
+        deterministicFailure.command || completionCommand,
+      ),
+      promptMode: "completion-continuation",
+    };
+  }
+  if (continued && !deterministicFailure && resumeTemplate != null) {
+    return { prompt: render(resumeTemplate, ctx), promptMode: "round-continuation" };
+  }
+  const prompt = composeStagePrompt(
+    stage,
+    render(initialTemplate, ctx),
+    deterministicFailure,
+    completionCommand,
+  );
+  if (crossStageAdoption) return { prompt, promptMode: "cross-stage-resume" };
+  if (deterministicFailure) return { prompt, promptMode: "fresh-retry" };
+  return { prompt, promptMode: continued ? "repeated-full" : "initial" };
 }
 
 export async function runStage({
@@ -258,21 +494,16 @@ export async function runStage({
   iter = 0,
   attempt = 0,
   deterministicFailure = null,
-  sessions = new Map(),
+  sessionLedger = makeSessionLedger(),
   maxCredits,
 }) {
   const template = readFileSync(path.resolve(promptRoot, stage.prompt), "utf8");
   // render() THROWS on a placeholder no stage produced. That is deliberate: a
   // prompt that silently loses its spec section still looks well-formed and still
   // returns a plausible answer, and nothing downstream can tell.
-  const completionCommand = stage.completion ? render(stage.completion.run, ctx) : null;
-  const prompt = composeStagePrompt(
-    stage,
-    render(template, ctx),
-    deterministicFailure,
-    completionCommand,
-  );
-
+  const completionCommand = stage.completion
+    ? renderCompletionPreview(stage.completion.run, ctx, stage.produces)
+    : null;
   const label =
     `${stage.id}${iter ? `.i${iter}` : ""}${round ? `.r${round}` : ""}` +
     `${attempt ? `.a${attempt + 1}` : ""}`;
@@ -285,20 +516,46 @@ export async function runStage({
     `${String(stage.ord ?? 0).padStart(2, "0")}-${stage.id}${iter ? `__i${iter}` : ""}`,
   );
 
-  // SESSION CONTINUITY. With `resume`, a stage's later rounds continue the SAME
-  // conversation rather than starting cold: the author still has its context, and
-  // the re-sent input is served as cache-read. This is a capability of driving the
-  // CLI directly and it is per-stage config, so "resume vs fresh" is an experiment
-  // you can run without touching code.
-  //
-  // Keyed by iteration too: resuming chunk 1's conversation to build chunk 2 would
-  // silently carry the previous chunk's context into a fresh piece of work.
-  let sessionId;
-  if (stage.resume) {
-    const key = `${stage.id}#${iter}`;
-    if (!sessions.has(key)) sessions.set(key, randomId());
-    sessionId = sessions.get(key);
+  const selected = selectSession({ ledger: sessionLedger, stage, iter });
+  if (!selected.ok) {
+    return {
+      ok: false,
+      error: selected.error,
+      kind: selected.kind,
+      wallMs: 0,
+      promptChars: null,
+      promptMode: null,
+      sessionId: null,
+      resumed: false,
+      resumedFrom: null,
+      resumeFailure: selected.failure,
+    };
   }
+  const sessionId = selected.sessionId || undefined;
+  const continued = selected.continuedTarget;
+  const crossStageAdoption = !!stage.resumeFrom && !continued;
+  const resumeTemplate = stage.resumePrompt
+    ? readFileSync(path.resolve(promptRoot, stage.resumePrompt), "utf8")
+    : null;
+  const { prompt, promptMode } = selectStagePrompt({
+    stage,
+    initialTemplate: template,
+    resumeTemplate,
+    ctx,
+    deterministicFailure,
+    completionCommand,
+    continued,
+    crossStageAdoption,
+    attempt,
+  });
+  const invocation = {
+    promptChars: prompt.length,
+    promptMode,
+    sessionId: sessionId || null,
+    resumed: selected.resumed,
+    resumedFrom: selected.resumedFrom,
+    provider: providerFor(stage.model).kind,
+  };
 
   const started = Date.now();
   const r = await complete({
@@ -312,7 +569,11 @@ export async function runStage({
     label,
     maxCredits,
     sessionId,
+    resumedFrom: selected.resumedFrom,
   });
+  invocation.sessionId = r.telemetry?.sessionId || sessionId || null;
+  if (r.telemetry && !r.telemetry.sessionId && invocation.sessionId)
+    r.telemetry.sessionId = invocation.sessionId;
 
   // A TIMEOUT IS NOT AN ANSWER. The child is killed and resolves through the normal
   // close path, so without this the caller sees only partial text and reports
@@ -328,6 +589,7 @@ export async function runStage({
       telemetry: r.telemetry,
       rawPath: r.rawPath,
       wallMs: Date.now() - started,
+      ...invocation,
     };
   }
 
@@ -347,6 +609,7 @@ export async function runStage({
       telemetry: r.telemetry,
       rawPath: r.rawPath,
       wallMs: Date.now() - started,
+      ...invocation,
     };
   }
 
@@ -391,6 +654,7 @@ export async function runStage({
         telemetry: r.telemetry,
         rawPath: r.rawPath,
         wallMs: Date.now() - started,
+        ...invocation,
       };
     }
     if (!recoveredFrom) value = p.value;
@@ -406,6 +670,7 @@ export async function runStage({
       telemetry: r.telemetry,
       rawPath: r.rawPath,
       wallMs: Date.now() - started,
+      ...invocation,
     };
   }
 
@@ -418,8 +683,7 @@ export async function runStage({
     recoveredFromCalls: recoveredFrom || undefined,
     telemetry: r.telemetry,
     rawPath: r.rawPath,
-    promptChars: prompt.length,
-    sessionId: sessionId || null,
+    ...invocation,
     wallMs: Date.now() - started,
   };
 }
@@ -437,6 +701,7 @@ export async function runCommandStage({
   round = 0,
   iter = 0,
   attempt = 0,
+  onLifecycle,
 }) {
   // The command is RENDERED, exactly like a prompt, so it can close over artifacts:
   // `run: pnpm test {{chunk.id}}`. render() throws on a placeholder no stage
@@ -477,6 +742,19 @@ export async function runCommandStage({
   }
 
   const started = Date.now();
+  const startedAt = new Date(started).toISOString();
+  const emit = (phase, data) => {
+    try {
+      onLifecycle?.({ phase, timestamp: new Date().toISOString(), ...data });
+    } catch {
+      /* additive observability must never change command execution */
+    }
+  };
+  emit("started", {
+    command: commandPreview(command),
+    artifact: stage.produces ? { name: stage.produces, parse: stage.parse || "text" } : null,
+    startedAt,
+  });
   const r = spawnSync("bash", ["-o", "pipefail", "-c", command], {
     cwd: workDir,
     encoding: "utf8",
@@ -494,7 +772,8 @@ export async function runCommandStage({
   });
   const wallMs = Date.now() - started;
   const stdout = r.stdout || "";
-  const output = `${stdout}\n${r.stderr || ""}`.trim();
+  const stderr = r.stderr || "";
+  const output = `${stdout}\n${stderr}`.trim();
 
   // The transcript is written on EVERY path, including failure, because the reason a
   // command failed is in its output and nowhere else. A run stage that halts a chain
@@ -514,36 +793,87 @@ export async function runCommandStage({
     /* the transcript is an observability aid; never fail a run over it */
   }
 
+  const finish = ({
+    ok,
+    kind = null,
+    error = null,
+    code = r.status,
+    value,
+    raw = null,
+    artifactState = ok ? "produced" : "candidate",
+  }) => {
+    const finishedAt = new Date().toISOString();
+    let artifact;
+    try {
+      artifact = artifactTelemetry(stage, value, stdout, artifactState);
+    } catch (telemetryError) {
+      artifact = stage.produces
+        ? {
+            name: stage.produces,
+            parse: stage.parse || "text",
+            state: value === undefined ? "declared" : artifactState,
+            telemetryError: String(telemetryError?.message || telemetryError),
+          }
+        : null;
+    }
+    const commandResult = {
+      status: ok ? "completed" : "failed",
+      ok,
+      processOk: r.status === 0 && !r.error,
+      failureKind: kind,
+      command: commandPreview(command),
+      startedAt,
+      finishedAt,
+      wallMs,
+      exitCode: code ?? null,
+      signal: r.signal || null,
+      stdout: textPreview(stdout),
+      stderr: textPreview(stderr, { tail: true }),
+      diagnostic: error ? textPreview(error, { tail: true }) : null,
+      artifact,
+    };
+    emit(ok ? "completed" : "failed", { result: commandResult });
+    return {
+      ok,
+      error,
+      kind,
+      command,
+      code: code ?? null,
+      output: output.slice(-OUTPUT_PREVIEW_CHARS),
+      stdout: commandResult.stdout,
+      stderr: commandResult.stderr,
+      raw,
+      rawPath,
+      wallMs,
+      commandResult,
+      ...(value !== undefined ? { value } : {}),
+    };
+  };
+
   // A TIMEOUT IS NOT A FAILING COMMAND. spawnSync reports it as a killing signal
   // with a null status, which would otherwise read as the generic non-zero path and
   // send the reader to the command instead of the clock.
   if (r.error?.code === "ETIMEDOUT" || (r.status === null && r.signal)) {
-    return {
+    return finish({
       ok: false,
       error: `stage "${stage.id}" (run) timed out after ${stage.timeoutMs}ms: ${command}`,
       kind: "timeout",
-      command,
-      output: output.slice(-12000),
-      rawPath,
-      wallMs,
-    };
+      code: null,
+    });
   }
   if (r.status !== 0) {
-    return {
+    const error =
+      `stage "${stage.id}" (run) exited ${r.status}: ${command}` +
+      (output ? `\n${output.slice(-2000)}` : "");
+    return finish({
       ok: false,
       // The exit code alone is not a diagnosis. The tail carries the actual reason,
       // which is the whole point of capturing it.
-      error:
-        `stage "${stage.id}" (run) exited ${r.status}: ${command}` +
-        (output ? `\n${output.slice(-2000)}` : ""),
+      error,
       kind: "run",
-      command,
       code: r.status,
-      output: output.slice(-12000),
       raw: output.slice(-2000),
-      rawPath,
-      wallMs,
-    };
+    });
   }
 
   // STDOUT ONLY when producing an artifact. stderr is where well-behaved tools put
@@ -553,74 +883,56 @@ export async function runCommandStage({
   if (stage.parse === "json") {
     const p = extractJson(stdout);
     if (!p.ok) {
-      return {
+      return finish({
         ok: false,
         error: `stage "${stage.id}" (run): ${p.error}`,
         kind: "parse",
-        command,
-        output: output.slice(-12000),
+        code: 0,
         raw: stdout.slice(-2000),
-        rawPath,
-        wallMs,
-      };
+      });
     }
     value = p.value;
   }
 
   const shapeProblems = checkShape(value, stage.expects);
   if (shapeProblems.length) {
-    return {
+    return finish({
       ok: false,
       error: `stage "${stage.id}" (run) broke its declared shape: ${shapeProblems.join("; ")}`,
       kind: "shape",
-      command,
-      output: output.slice(-12000),
-      raw: JSON.stringify(value).slice(0, 2000),
-      rawPath,
-      wallMs,
-    };
+      code: 0,
+      raw: stdout.slice(0, 2000),
+      value,
+    });
   }
 
   // No `telemetry` row on purpose: there is no model call to price. A run stage is
   // free, and inventing a zero-cost row would put it in the per-stage cost table as
   // though it had been billed and merely come back cheap.
   return {
-    ok: true,
-    value,
-    command,
-    code: 0,
-    output: output.slice(-12000),
-    rawPath,
-    wallMs,
+    ...finish({ ok: true, value, code: 0 }),
     promptChars: command.length,
     sessionId: null,
   };
-}
-
-function randomId() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-  });
 }
 
 export function selfTest() {
   const CASES = [];
 
   const completionPrompt = composeStagePrompt(
-    { parse: "text", completion: { run: "pnpm check", max: 3 } },
+    { parse: "text", completion: { run: "pnpm check", attempts: 3 } },
     "Do the work.",
   );
   CASES.push([
     "the initial model prompt names its enforced completion command",
     completionPrompt.includes("pnpm check") &&
       completionPrompt.includes("Run it yourself") &&
-      completionPrompt.includes("maximum 3 attempt(s)"),
+      completionPrompt.includes("3 total attempt(s)"),
   ]);
   CASES.push([
     "the initial completion instruction uses the rendered command",
     composeStagePrompt(
-      { parse: "text", completion: { run: "pnpm test {{chunk.id}}", max: 2 } },
+      { parse: "text", completion: { run: "pnpm test {{chunk.id}}", attempts: 2 } },
       "Build it.",
       null,
       "pnpm test c7",
@@ -629,7 +941,7 @@ export function selfTest() {
   const retryPrompt = composeStagePrompt({ parse: "text" }, "Repair.", {
     command: "pnpm check",
     attempt: 2,
-    max: 3,
+    attempts: 3,
     tail: "Type error in src/a.ts",
   });
   CASES.push([
@@ -637,6 +949,102 @@ export function selfTest() {
     retryPrompt.includes("pnpm check") &&
       retryPrompt.includes("Attempt: 2/3") &&
       retryPrompt.includes("Type error in src/a.ts"),
+  ]);
+  const resumedRetry = selectStagePrompt({
+    stage: {
+      parse: "text",
+      resume: true,
+      completion: { run: "pnpm check", attempts: 3 },
+    },
+    initialTemplate: "ORIGINAL DISCOVERY PROMPT",
+    ctx: {},
+    deterministicFailure: {
+      context: "The exact heading reference is wrong.",
+      command: "pnpm check",
+      attempt: 2,
+      attempts: 3,
+      output: "line one\nline two",
+    },
+    completionCommand: "pnpm check changed-context",
+    continued: true,
+    attempt: 1,
+  });
+  CASES.push([
+    "a resumed deterministic retry sends only compact continuation context",
+    resumedRetry.promptMode === "completion-continuation" &&
+      !resumedRetry.prompt.includes("ORIGINAL DISCOVERY PROMPT") &&
+      resumedRetry.prompt.includes("The exact heading reference is wrong.") &&
+      resumedRetry.prompt.includes("pnpm check") &&
+      !resumedRetry.prompt.includes("changed-context") &&
+      resumedRetry.prompt.includes("attempt 2/3") &&
+      resumedRetry.prompt.includes("line one\nline two") &&
+      resumedRetry.prompt.includes("Do not repeat repository discovery"),
+  ]);
+  const crossStage = selectStagePrompt({
+    stage: { parse: "text", resumeFrom: "plan" },
+    initialTemplate: "ONLY THE FIX PROMPT",
+    resumeTemplate: "SMALLER LATER PROMPT",
+    ctx: {},
+    crossStageAdoption: true,
+    continued: false,
+  });
+  CASES.push([
+    "first cross-stage adoption sends the target's own full prompt",
+    crossStage.promptMode === "cross-stage-resume" &&
+      crossStage.prompt.includes("ONLY THE FIX PROMPT") &&
+      !crossStage.prompt.includes("SMALLER LATER PROMPT"),
+  ]);
+  const freshRetry = selectStagePrompt({
+    stage: { parse: "text", resume: false },
+    initialTemplate: "ORIGINAL DISCOVERY PROMPT",
+    ctx: {},
+    deterministicFailure: {
+      context: "The check failed.",
+      command: "pnpm check",
+      attempt: 2,
+      attempts: 3,
+      output: "failure",
+    },
+    completionCommand: "pnpm check",
+    attempt: 1,
+  });
+  CASES.push([
+    "a fresh deterministic retry retains the original authored context",
+    freshRetry.promptMode === "fresh-retry" &&
+      freshRetry.prompt.includes("ORIGINAL DISCOVERY PROMPT") &&
+      freshRetry.prompt.includes("The check failed."),
+  ]);
+  const resumedCompositeRepair = selectStagePrompt({
+    stage: { parse: "text", resume: true },
+    initialTemplate: "ORIGINAL REPAIR PROMPT",
+    ctx: {},
+    deterministicFailure: {
+      context: "The assembled repository failed.",
+      command: "pnpm integration",
+      attempt: 2,
+      attempts: 3,
+      output: "integration failure",
+    },
+    continued: true,
+    attempt: 0,
+  });
+  CASES.push([
+    "a resumed composite repair also receives compact failure context",
+    resumedCompositeRepair.promptMode === "completion-continuation" &&
+      !resumedCompositeRepair.prompt.includes("ORIGINAL REPAIR PROMPT") &&
+      resumedCompositeRepair.prompt.includes("pnpm integration"),
+  ]);
+  const roundContinuation = selectStagePrompt({
+    stage: { parse: "text", resume: true },
+    initialTemplate: "ORIGINAL DISCOVERY PROMPT",
+    resumeTemplate: "Continue {{item}} only.",
+    ctx: { has: (name) => name === "item", get: () => "c7" },
+    continued: true,
+  });
+  CASES.push([
+    "a resumed loop invocation uses the authored resume prompt",
+    roundContinuation.promptMode === "round-continuation" &&
+      roundContinuation.prompt === "Continue c7 only.",
   ]);
 
   CASES.push(["bare JSON parses", extractJson('{"a":1}').value.a === 1]);

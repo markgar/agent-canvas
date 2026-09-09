@@ -18,6 +18,10 @@ Write meaningful tests for the stated behavior, including negative cases. Format
 is your responsibility; measurement uses format:check and will not rewrite files.
 Earlier chunks are committed; later chunks do not exist yet. Do not commit, push,
 merge, edit the spec, modify existing npm scripts, or change policy/tooling to pass.
+Keep new tests and their narrow helpers in this chunk, not a separate full-feature
+preparation project. The host rebuilds current outputs, typechecks, and runs
+baseline regressions before selected feature checks. Preserve earlier accepted
+tests when a later chunk explicitly revisits a file.
 
 Return concise buildNotes: changed behavior, checks run and observed outcomes,
 known limitations. Notes are not acceptance evidence; the harness reruns checks.

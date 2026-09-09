@@ -10,7 +10,7 @@ export function runReadOnlyCheck(cwd: string, command: string[]) {
     cwd,
     shell: false,
     encoding: 'utf8',
-    timeout: 120_000,
+    timeout: 300_000,
     maxBuffer: 1024 * 1024,
   });
   if (fingerprint(cwd) !== before) {

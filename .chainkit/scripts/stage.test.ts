@@ -20,9 +20,10 @@ import {
   requireFreshBase,
 } from './repository.js';
 import { executeStage } from './stage.js';
+import { runStateSchema } from './state.js';
 import { examplePlan, exampleSpec } from './test-fixtures.js';
 
-describe('consumer-owned chain gates', () => {
+describe('consumer-owned chain gates', { timeout: 20_000 }, () => {
   let root: string;
   let work: string;
   let state: string;
@@ -38,7 +39,7 @@ describe('consumer-owned chain gates', () => {
     writeJson(artifacts, value);
   };
   const approvePlan = () => {
-    supply({ plan, planVerdict: { pass: true, findings: [] } });
+    supply({ buildPlan: plan });
     executeStage('lock-plan');
   };
   const prepare = () => {
@@ -59,6 +60,9 @@ describe('consumer-owned chain gates', () => {
     mkdirSync(state);
     artifacts = path.join(root, 'artifacts.json');
     const scripts = {
+      build: 'node -e "process.exit(0)"',
+      typecheck: 'node -e "process.exit(0)"',
+      test: 'node -e "process.exit(0)"',
       'format:check': 'node -e "process.exit(0)"',
       check: 'node -e "process.exit(0)"',
     };
@@ -107,41 +111,11 @@ describe('consumer-owned chain gates', () => {
     }).toThrow('stale');
   });
 
-  it('checks the plan without modifying files and locks only a passed review', () => {
+  it('checks the draft and corrected plans before locking the build plan', () => {
     supply({ plan });
     expect(executeStage('check-plan')).toEqual({ valid: true });
-    supply({
-      plan,
-      planReview: {
-        pass: false,
-        findings: [
-          {
-            id: 'P1',
-            file: 'src/value.ts',
-            requirement: 'EX-001',
-            problem: 'missing case',
-            remedy: 'cover it',
-          },
-        ],
-      },
-    });
-    expect(executeStage('plan-decision')).toMatchObject({ pass: false });
-    supply({
-      plan,
-      planVerdict: {
-        pass: false,
-        findings: [
-          {
-            id: 'P1',
-            file: 'src/value.ts',
-            requirement: 'EX-001',
-            problem: 'missing case',
-            remedy: 'cover it',
-          },
-        ],
-      },
-    });
-    expect(() => executeStage('lock-plan')).toThrow('Rejected plan');
+    supply({ buildPlan: plan });
+    expect(executeStage('check-build-plan')).toEqual({ valid: true });
     approvePlan();
     expect(
       JSON.parse(readFileSync(path.join(state, 'plan.json'), 'utf8')),
@@ -168,13 +142,12 @@ describe('consumer-owned chain gates', () => {
     expect(() => executeStage('prepare')).toThrow('symlinks');
   });
 
-  it('requires both measured acceptance and review before the checkpoint gate', () => {
+  it('requires current post-repair measurements before the checkpoint gate', () => {
     prepare();
     makeChange();
-    expect(() => executeStage('chunk-gate')).toThrow('passing review');
+    expect(() => executeStage('chunk-gate')).toThrow();
     const facts = executeStage('measure');
-    supply({ facts, review: { pass: true, findings: [] } });
-    expect(executeStage('decide')).toEqual({ pass: true, findings: [] });
+    supply({ facts });
     expect(executeStage('chunk-gate')).toEqual({ pass: true });
     git(work, 'add', '.');
     git(work, 'commit', '-qm', 'checkpoint');
@@ -184,40 +157,67 @@ describe('consumer-owned chain gates', () => {
     });
   });
 
-  it('does not let a passing model verdict override measured failures', () => {
+  it('does not let the repair handoff override measured failures', () => {
     prepare();
     makeChange();
     writeFileSync(path.join(work, 'outside.ts'), 'unowned');
     const facts = executeStage('measure');
-    supply({ facts, review: { pass: true, findings: [] } });
-    expect(executeStage('decide')).toMatchObject({
-      pass: false,
-      findings: [expect.objectContaining({ id: 'file-scope' })],
-    });
-    expect(() => executeStage('chunk-gate')).toThrow('passing review');
+    supply({ facts });
+    expect(() => executeStage('chunk-gate')).toThrow('outside ownership');
   });
 
-  it('rejects a reviewed no-op chunk and an edit after passing review', () => {
+  it('builds current code and runs regressions even when the chunk selects another check', () => {
+    prepare();
+    makeChange();
+    expect(executeStage('measure')).toMatchObject({
+      pass: true,
+      checks: [
+        { id: '_build', command: ['npm', 'run', 'build'] },
+        { id: '_typecheck', command: ['npm', 'run', 'typecheck'] },
+        { id: '_regressions', command: ['npm', 'test'] },
+        { id: 'behavior' },
+        { id: '_format' },
+      ],
+    });
+  });
+
+  it('does not run acceptance against old artifacts when the build fails', () => {
+    const stateFile = path.join(state, 'run.json');
+    const run = runStateSchema.parse(
+      JSON.parse(readFileSync(stateFile, 'utf8')),
+    );
+    run.scripts['build'] = 'node -e "process.exit(1)"';
+    writeJson(path.join(work, 'package.json'), { scripts: run.scripts });
+    git(work, 'add', '.');
+    git(work, 'commit', '-qm', 'failing build fixture');
+    run.initialFingerprint = fingerprint(work);
+    writeJson(stateFile, run);
+    prepare();
+    makeChange();
+    expect(executeStage('measure')).toMatchObject({
+      pass: false,
+      checks: [{ id: '_build', pass: false }],
+    });
+    supply({ facts: executeStage('measure') });
+    expect(() => executeStage('chunk-gate')).toThrow(
+      'outside ownership or acceptance',
+    );
+  });
+  it('rejects a measured no-op chunk and edits after measurement', () => {
     prepare();
     let facts = executeStage('measure');
-    supply({ facts, review: { pass: true, findings: [] } });
-    executeStage('decide');
+    supply({ facts });
     expect(() => executeStage('chunk-gate')).toThrow('no changes');
     makeChange();
     facts = executeStage('measure');
-    supply({ facts, review: { pass: true, findings: [] } });
-    executeStage('decide');
+    supply({ facts });
     chmodSync(path.join(work, 'src/value.ts'), 0o755);
-    expect(() => executeStage('chunk-gate')).toThrow('current contents');
+    expect(() => executeStage('chunk-gate')).toThrow('stale measured facts');
   });
 
-  it('rejects stale reviews, changed specs/scripts, and agent commits', () => {
+  it('rejects changed specs, scripts, and agent commits', () => {
     prepare();
     makeChange();
-    const facts = executeStage('measure');
-    writeFileSync(path.join(work, 'src/value.ts'), 'changed after measurement');
-    supply({ facts, review: { pass: true, findings: [] } });
-    expect(() => executeStage('decide')).toThrow('stale measurement');
     writeFileSync(path.join(work, 'specs/example.md'), `${specText}\nchanged`);
     expect(() => executeStage('measure')).toThrow('Approved spec changed');
     writeFileSync(path.join(work, 'specs/example.md'), specText);

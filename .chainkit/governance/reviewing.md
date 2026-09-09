@@ -26,20 +26,27 @@ Completed specs are historical context only, not injected requirements.
   passes. Reviewed checks cannot be edited to make implementation pass.
   Block feature-chain edits to protected build policy, vendor, spec, or quality-gate
   files; workflow changes belong to separate human-reviewed work.
+  Review newly authored tests together with the capability: require meaningful
+  assertions for its assigned requirements, not just a green existing scaffold.
+  Explicitly review planned sequential revisits for regression loss. Test support
+  must not impose unnecessary product structure or contain a parallel fake
+  implementation. A chunk must remain small enough to inspect its code and tests.
 - **REV-005 — Honest acceptance.** Distinguish automated evidence from human-only
   acceptance and proposed/unavailable checks. Never substitute a simulated test
   for real browser isolation evidence or automate real-email consent.
 - **REV-006 — Findings.** Report concrete file/line evidence, violated rule or
   requirement IDs, impact, and the smallest in-scope correction. Clearly
-  distinguish blockers from optional suggestions; no speculative scope expansion.
+  distinguish blockers from optional suggestions; omit optional suggestions from
+  the blocking artifact and never use speculative scope expansion. Limit plan review
+  to five blockers and implementation review to three. Findings must be consequential
+  and directly repairable in one pass.
 - **REV-007 — Read-only authority.** Do not implement fixes, alter specs/checks,
   approve on behalf of a human, or silently reinterpret a product requirement.
   If a check itself is wrong, request human review rather than rewriting it.
-- **REV-008 — Repair verification.** Recheck each disposition against the actual
-  repaired diff and affected check evidence, including regressions. Reuse this
-  independent review role; do not add reviewers to bypass the budget.
-  Allow at most two repair rounds total, then report unresolved blockers.
-- **REV-009 — Completion.** A recommendation requires all mandatory evidence and
-  no unresolved blockers. It is not human approval, permission to mark a draft
-  approved, or permission to push/merge. Report remaining human-only acceptance
-  explicitly; never claim a complete feature while it remains unmet.
+- **REV-008 — One-way repair handoff.** Send the finite blocking finding set directly
+  to the original planner or builder lineage for one bounded correction pass. Do not
+  semantically re-review the repair or expand the finding set. Deterministic final-plan,
+  chunk, and repository gates decide whether corrected work may advance.
+- **REV-009 — Completion.** A review recommendation guides the single repair; it is
+  not human approval, permission to mark a draft approved, or permission to push or
+  merge. Objective gate success still leaves human-only acceptance pending.

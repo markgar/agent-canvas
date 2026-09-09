@@ -15,8 +15,6 @@ export const runStateSchema = z.strictObject({
 export const chunkStateSchema = z.strictObject({
   id: z.string(),
   head: z.string(),
-  reviewedFingerprint: z.string().nullable(),
-  pass: z.boolean(),
 });
 
 export function stateDirectory(): string {

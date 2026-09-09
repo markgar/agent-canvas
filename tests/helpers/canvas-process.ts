@@ -501,8 +501,30 @@ export class CanvasChildProcess {
     this.#child.kill(signal);
   }
 
-  waitForExit(): Promise<ProcessExit> {
-    return this.#exit;
+  async waitForExit(timeoutMs?: number): Promise<ProcessExit> {
+    if (timeoutMs === undefined) {
+      return this.#exit;
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        this.#exit,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new Error(
+                `Agent Canvas did not exit within ${timeoutMs.toString()}ms.`,
+              ),
+            );
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
   }
 
   async close(): Promise<void> {

@@ -21,9 +21,10 @@ describe('compiled process entry point', () => {
       const response = await fetch(`${address}/health`);
       expect(response.status).toBe(200);
       process.signal(signal);
-      expect(await process.waitForExit()).toEqual([0, null]);
+      expect(await process.waitForExit(5_000)).toEqual([0, null]);
       expect(process.stdout).toBe('');
     },
+    120_000,
   );
 
   it('stops cleanly when MCP stdin reaches EOF', async () => {

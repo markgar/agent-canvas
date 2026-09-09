@@ -1,19 +1,23 @@
 {
-  "name": "agent-canvas",
+  "name": "agent-canvas-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "A local, MCP-driven visual surface for AI assistants.",
+  "description": "Local-first applications for an AI-assisted personal knowledge system.",
   "license": "UNLICENSED",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22.14.0 <23",
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "tsx watch src/server/main.ts",
-    "build": "node scripts/build.mjs",
-    "start": "node dist/server/main.js",
-    "typecheck": "tsc --noEmit && tsc --project tsconfig.server.json && tsc --project tsconfig.client.json && tsc --project tsconfig.contracts.json",
+    "dev": "npm run dev --workspace @agent-canvas/canvas",
+    "build": "npm run build --workspace @agent-canvas/canvas",
+    "start": "npm run start --workspace @agent-canvas/canvas",
+    "typecheck": "npm run typecheck --workspace @agent-canvas/canvas && tsc --noEmit --project tsconfig.json",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -26,13 +30,6 @@
     "chainkit:selftest": "node vendor/chainkit/selftest.mjs && node vendor/chainkit/completion.selftest.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run chainkit:validate && npm run build && npm run test:coverage",
     "browser:install": "PLAYWRIGHT_SKIP_BROWSER_GC=1 playwright install chromium"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "css-tree": "3.2.1",
-    "fastify": "^5.12.1",
-    "sanitize-html": "2.17.7",
-    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

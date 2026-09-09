@@ -26,7 +26,7 @@ npm run build
 Configure the MCP host to execute the compiled entry point directly:
 
 ```text
-node /absolute/path/to/agent-canvas/dist/server/main.js
+node /absolute/path/to/repository/apps/canvas/dist/server/main.js
 ```
 
 Do not use `npm start` as the MCP command because npm output can contaminate the
@@ -88,21 +88,17 @@ demonstration, remain outstanding and are not implied by automated results.
 ## Repository map
 
 ```text
-src/
-  contracts/          Portable runtime schemas and inferred wire types
-  server/
-    config.ts         Validated environment configuration
-    main.ts           Stdio/HTTP startup, diagnostics, and shutdown
-    display/          Serialized in-memory current-view operations
-    security/         Browser sessions and HTML/CSS sanitization
-    mcp/              Official SDK stdio tool adapter
-    http/             Shell assets, session routes, and authenticated SSE
-  client/
-    shell/            Trusted shell, validated SSE, and liveness state
-    rendering/        Sandboxed frame creation and replacement
-tests/
-  browser/            Compiled-process Chromium behavior and security evidence
-  integration/        Real MCP, HTTP, and process-lifecycle tests
+apps/
+  canvas/
+    src/
+      contracts/      Portable runtime schemas and inferred wire types
+      server/         MCP, HTTP, display, and security implementation
+      client/         Trusted shell and sandboxed frame rendering
+    tests/
+      browser/        Compiled-process Chromium behavior and security evidence
+      integration/    Real MCP, HTTP, and process-lifecycle tests
+    package.json      Canvas runtime dependencies and app-local commands
+packages/             Reserved for libraries with a demonstrated second consumer
 docs/
   architecture.md     Dependency rules and growth path
   build-system.md     Build architecture and evidence behind its design
@@ -114,15 +110,17 @@ vendor/chainkit/      Unmodified, pinned generic executor (MIT)
   workflows/          Automated quality gate
 ```
 
-One deployable application and one dependency graph, with explicit internal
-boundaries. This is intentionally not a monorepo or plugin platform.
+The repository is an npm workspace with one deployable application today.
+Additional applications belong under `apps/` only when they have an independent
+runtime boundary. Shared packages belong under `packages/` only after a real
+second consumer exists; the workspace layout is not a plugin system.
 
 ## Development commands
 
 | Command                 | Purpose                                                   |
 | ----------------------- | --------------------------------------------------------- |
 | `npm run dev`           | Run the server with restart-on-change                     |
-| `npm run build`         | Compile production server and contracts to `dist/`        |
+| `npm run build`         | Compile Canvas to `apps/canvas/dist/`                     |
 | `npm start`             | Run the compiled server                                   |
 | `npm run typecheck`     | Check application/tests and environment-neutral contracts |
 | `npm run lint`          | Type-aware linting and dependency-boundary rules          |

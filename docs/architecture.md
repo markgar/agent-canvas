@@ -2,11 +2,13 @@
 
 ## Implemented application
 
-Agent Canvas is one Node.js process and one npm package, compiled from TypeScript
-to native ESM with a bundled framework-free browser client. The official MCP SDK
-owns stdio protocol framing. Fastify owns loopback HTTP routing and lifecycle.
-Zod defines portable runtime contracts. Vitest, Playwright, ESLint, Prettier, and
-TypeScript provide the automated quality gate.
+Agent Canvas is one Node.js process and one npm workspace package under
+`apps/canvas`, compiled from TypeScript to native ESM with a bundled
+framework-free browser client. The repository root coordinates npm workspaces
+and the shared quality gate. The official MCP SDK owns stdio protocol framing.
+Fastify owns loopback HTTP routing and lifecycle. Zod defines portable runtime
+contracts. Vitest, Playwright, ESLint, Prettier, and TypeScript provide the
+automated quality gate.
 
 The delivered data flow is:
 
@@ -34,11 +36,12 @@ storage boundary and may retain URLs, cookies, or displayed data.
 
 ## Dependency direction
 
-| Area            | May depend on                                               | Must not depend on                                  |
-| --------------- | ----------------------------------------------------------- | --------------------------------------------------- |
-| `src/contracts` | Portable schemas and explicitly approved portable libraries | Server, browser implementation, Node.js/DOM globals |
-| `src/server`    | Contracts, Node.js, server libraries                        | Browser implementation                              |
-| `src/client`    | Contracts, browser APIs and portable libraries              | Server modules and Node.js                          |
+| Area                              | May depend on                                               | Must not depend on                                  |
+| --------------------------------- | ----------------------------------------------------------- | --------------------------------------------------- |
+| `apps/canvas/src/contracts`       | Portable schemas and explicitly approved portable libraries | Server, browser implementation, Node.js/DOM globals |
+| `apps/canvas/src/server`          | Contracts, Node.js, server libraries                        | Browser implementation                              |
+| `apps/canvas/src/client`          | Contracts, browser APIs and portable libraries              | Server modules and Node.js                          |
+| Future applications under `apps/` | Their declared packages and runtime-specific libraries      | Another application's implementation modules        |
 
 ESLint enforces import boundaries; a separate TypeScript check compiles contracts
 without ambient Node.js or DOM types. Tests may cross boundaries to exercise
@@ -50,15 +53,15 @@ Organize by feature within each runtime boundary as features appear.
 ## Runtime modules
 
 ```text
-src/server/
+apps/canvas/src/server/
   display/        Transport-independent state and application operations
   security/       Authentication and content sanitization
   mcp/            Official SDK adapter, delegating to display operations
   http/           Shell assets, authenticated SSE, browser session routes
-src/client/
+apps/canvas/src/client/
   shell/          Trusted browser state and connection handling
   rendering/      Isolated frame lifecycle
-src/contracts/
+apps/canvas/src/contracts/
   display.ts      Shared runtime schemas, revision and event contracts
 ```
 
@@ -67,10 +70,11 @@ mutation section. It atomically retains one full current snapshot, advances the
 revision once, and publishes after mutation. Rejected input cannot change state.
 There is no history, persistence, or HTTP MCP endpoint.
 
-`tsconfig.server.json` and `tsconfig.client.json` check production Node and DOM
-boundaries independently of the mixed test program; contracts remain portable.
-The build compiles server/contracts and bundles `src/client/shell/main.ts` with
-esbuild. Tests may cross boundaries only to exercise real integration behavior.
+The app-local `tsconfig.server.json` and `tsconfig.client.json` check production
+Node and DOM boundaries independently of the mixed test program; contracts
+remain portable. The build compiles server/contracts and bundles
+`apps/canvas/src/client/shell/main.ts` with esbuild. Tests may cross boundaries
+only to exercise real integration behavior.
 
 ## Browser access and rendering
 
@@ -105,11 +109,14 @@ rules, and removes scripts, forms, navigation, remote resources, arbitrary SVG,
 and other active content. The result is rendered in a sandbox without
 `allow-scripts` or `allow-same-origin` and with a restrictive frame CSP.
 
-## When to split
+## Workspace growth
 
-Extract a package when a real second consumer needs a stable public API, or a
-component has an independent release/deployment lifecycle. Directory count or
-line count alone is not a reason to create a monorepo.
+The npm workspace is intentionally sparse. Put independently runnable products
+under `apps/`; a future knowledge service would belong there rather than inside
+the Canvas process. Extract code into `packages/` only when a real second
+consumer needs a stable public API. Directory count or line count alone is not a
+reason to add a package, and applications must not import each other's internal
+source files.
 
 The knowledge service is a separate product boundary, not a database to add here.
 Keep email authorization and execution in the assistant's existing integrations.

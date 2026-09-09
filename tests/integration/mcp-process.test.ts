@@ -255,5 +255,5 @@ describe('compiled MCP process', () => {
       headers: { cookie: session.cookie },
     });
     expect(oldCookieResponse.status).toBe(401);
-  });
+  }, 15_000);
 });

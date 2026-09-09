@@ -6,7 +6,7 @@
 2. Read `SPEC.md` and `docs/architecture.md` before changing boundaries.
 3. Make a focused change with tests beside the affected module.
 4. Run the smallest relevant tests while iterating, for example
-   `npm test -- src/server/config.test.ts`.
+   `npm test -- apps/canvas/src/server/config.test.ts`.
 5. Run `npm run check` before opening a pull request.
 
 Commit `package-lock.json` with dependency changes. Use npm, not a second package
@@ -36,8 +36,8 @@ so installations respect each developer's configured registry.
 ## Tests and definition of done
 
 Unit tests live alongside source as `*.test.ts`. Cross-module HTTP and process
-tests live in `tests/integration/`. Tests use ephemeral ports, close resources, and
-must not depend on external services, credentials, or real email.
+tests live in `apps/canvas/tests/integration/`. Tests use ephemeral ports, close
+resources, and must not depend on external services, credentials, or real email.
 
 A change is ready when it has the relevant success and failure coverage, preserves
 module boundaries, passes the quality gate, and updates directly affected docs.

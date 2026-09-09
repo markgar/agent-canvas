@@ -5,8 +5,8 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   {
     ignores: [
-      'dist/**',
-      'coverage/**',
+      '**/dist/**',
+      '**/coverage/**',
       '**/node_modules/**',
       'vendor/**',
       '.chainkit/results/**',
@@ -30,7 +30,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/contracts/**/*.ts'],
+    files: ['apps/canvas/src/contracts/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: {
       'no-restricted-imports': [
@@ -53,7 +53,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/client/**/*.ts'],
+    files: ['apps/canvas/src/client/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: {
       'no-restricted-imports': [
@@ -75,7 +75,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/server/**/*.ts'],
+    files: ['apps/canvas/src/server/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: {
       'no-restricted-imports': [

@@ -4,17 +4,17 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: [
-      'src/**/*.test.ts',
-      'tests/**/*.test.ts',
+      'apps/canvas/src/**/*.test.ts',
+      'apps/canvas/tests/**/*.test.ts',
       '.chainkit/scripts/**/*.test.ts',
     ],
     clearMocks: true,
     restoreMocks: true,
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
+      include: ['apps/canvas/src/**/*.ts'],
       // The process entry point is exercised by subprocess integration tests.
-      exclude: ['src/server/main.ts', '**/*.test.ts'],
+      exclude: ['apps/canvas/src/server/main.ts', '**/*.test.ts'],
       reporter: ['text', 'lcov'],
       thresholds: {
         statements: 90,

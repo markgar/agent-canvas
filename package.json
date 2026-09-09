@@ -32,7 +32,7 @@
     "browser:install": "PLAYWRIGHT_SKIP_BROWSER_GC=1 playwright install chromium"
   },
   "devDependencies": {
-    "@eslint/js": "^9.0.0",
+    "@eslint/js": "^10.0.1",
     "@types/css-tree": "3.2.0",
     "@types/node": "^22.0.0",
     "@types/sanitize-html": "2.16.1",

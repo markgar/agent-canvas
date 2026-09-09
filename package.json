@@ -24,7 +24,7 @@
     "chainkit:run": "tsx .chainkit/scripts/cli.ts run",
     "chainkit:vendor": "tsx .chainkit/scripts/vendor.ts",
     "chainkit:selftest": "node vendor/chainkit/selftest.mjs && node vendor/chainkit/completion.selftest.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run chainkit:validate && npm run test:coverage && npm run build",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run chainkit:validate && npm run build && npm run test:coverage",
     "browser:install": "PLAYWRIGHT_SKIP_BROWSER_GC=1 playwright install chromium"
   },
   "dependencies": {

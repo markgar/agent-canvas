@@ -94,6 +94,17 @@ describe('compiled browser live display', () => {
     expect(await first.locator('#empty-title').textContent()).toBe(
       'Synthetic launch review',
     );
+    const contentRegionBox = await first
+      .locator('.content-region')
+      .boundingBox();
+    const contentFrameBox = await first
+      .locator('iframe.content-frame')
+      .boundingBox();
+    expect(contentRegionBox).not.toBeNull();
+    expect(contentFrameBox).not.toBeNull();
+    expect(contentFrameBox?.height).toBeGreaterThan(
+      (contentRegionBox?.height ?? 0) - 100,
+    );
     await second.reload({ waitUntil: 'domcontentloaded' });
     await waitForStatus(second, 'Connected');
     await waitForFrameText(second, email.recommendation);
